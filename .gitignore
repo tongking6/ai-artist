@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+
+.cache/
+outputs/
+generated/
+
+.DS_Store
+node_modules/
+dist/
+build/
+coverage/
