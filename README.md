@@ -137,6 +137,7 @@ Do not create this full structure until the implementation direction is confirme
 - [AGENTS.md](./AGENTS.md): instructions for future agent work in this repository.
 - [Milestone 1 PRFAQ](./docs/prfaq/milestone-1-scope.md): M1 customer promise, scope, pricing, success metrics, and launch assumptions.
 - [Milestone 1 HLD](./docs/hld/milestone-1-high-level-design.md): high-level product and technical design for the website, serverless AWS runtime, automated generation, QA, packaging, and delivery model.
+- [Milestone 1 LLDs](./docs/lld/README.md): signed-off low-level design set for website intake, backend lifecycle, generation, QA/packaging, and AWS runtime.
 
 ## Sources
 
