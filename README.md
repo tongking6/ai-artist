@@ -31,9 +31,9 @@ The useful signal is that users respond to reusable style systems and memory-bas
 
 ## M1: Memory Product Pack Agent
 
-The recommended first milestone is:
+The recommended first milestone core is:
 
-> User uploads 1 to 5 photos they own or have permission to use. The agent creates a cohesive travel memory product pack with a sticker sheet, postcard, poster, mockups, and an Etsy-ready listing draft.
+> User uploads 1 to 5 photos they own or have permission to use. The website/API creates a cohesive travel memory product pack with a sticker sheet, postcard, poster, and social preview.
 
 M1 should optimize for one niche first:
 
@@ -46,7 +46,7 @@ Why this first:
 - lower IP risk than fan art, celebrities, brands, or fictional characters
 - easy to validate on social platforms and Etsy-style digital listings
 
-## Expected M1 Outputs
+## Expected M1 Core Outputs
 
 - `sticker_sheet`
   - printable PNG or PDF
@@ -60,17 +60,9 @@ Why this first:
   - common ratios such as 2:3, 3:4, and 4:5
   - high-resolution PNG or PDF
 
-- `mockups`
-  - Etsy listing preview image
-  - social preview image
-
-- `listing_kit`
-  - title draft
-  - description draft
-  - tags draft
-  - buyer note
-  - file list
-  - AI disclosure draft
+- `social_preview`
+  - shareable preview image
+  - product-pack cover image
 
 - `quality_report`
   - output dimensions
@@ -78,6 +70,14 @@ Why this first:
   - watermark/signature check
   - print suitability notes
   - IP/trademark/likeness checklist
+
+## Follow-Up Outputs
+
+These are useful for the broader product vision but are not core M1 deliverables:
+
+- `listing_preview`
+- `listing_kit`
+- `buyer_usage_note`
 
 ## Agent Modules
 
@@ -90,7 +90,7 @@ AI Artist can be designed as a multi-step agent system:
 - `Compliance Agent`: flags IP, trademark, likeness, AI disclosure, and platform risks.
 - `Publisher Agent`: later creates marketplace drafts only after explicit user confirmation.
 
-M1 should generate local assets and listing drafts. It should not automatically publish to Etsy, Shopify, print-on-demand, or NFT platforms.
+M1 core should generate downloadable art assets. Listing drafts can follow after the core generation loop works. It should not automatically publish to Etsy, Shopify, print-on-demand, or NFT platforms.
 
 ## Channel Strategy
 
@@ -135,6 +135,8 @@ Do not create this full structure until the implementation direction is confirme
 
 - [SETUP.md](./SETUP.md): required project, environment, marketplace, and quality settings.
 - [AGENTS.md](./AGENTS.md): instructions for future agent work in this repository.
+- [Milestone 1 PRFAQ](./docs/prfaq/milestone-1-scope.md): M1 customer promise, scope, pricing, success metrics, and launch assumptions.
+- [Milestone 1 HLD](./docs/hld/milestone-1-high-level-design.md): high-level product and technical design for the website, serverless AWS runtime, automated generation, QA, packaging, and delivery model.
 
 ## Sources
 
