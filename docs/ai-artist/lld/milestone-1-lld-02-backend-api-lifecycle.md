@@ -1,4 +1,4 @@
-# AI Artist M1 LLD-02: Backend API, Request Lifecycle, Upload/Download Links, and Request Metadata Contracts
+# AI Artist M1 LLD-02: Backend API, Task Lifecycle, Upload/Download Links, and Task Metadata Contracts
 
 ## Document Control
 
@@ -7,29 +7,27 @@
 | LLD | LLD-02 |
 | Product milestone | M1: `Memory Product Pack Agent` |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Reviewer reconfirmed signoff |
-| Scope owner | Backend API, lifecycle, token model, upload/download contracts, `project.json`, and attempt metadata |
+| Status | Tech Lead agreed draft; cross-LLD reconfirmation pending |
+| Scope owner | Backend API, lifecycle, token model, upload/download contracts, attempt input snapshots, and attempt metadata |
 
 ## Purpose
 
-LLD-02 defines the backend contract that turns website intake into a durable request, private uploads, validated `project.json`, asynchronous generation attempts, request status, and final download-link issuance.
+LLD-02 defines the backend contract that turns website intake into a durable task, private uploads, immutable generation attempts, task metadata/status, and artifact download-link issuance.
 
-LLD-02 is the source of truth for request lifecycle and attempt metadata.
+LLD-02 is the source of truth for task lifecycle and attempt metadata.
 
 ## In Scope
 
-- Request creation.
-- Request-link token creation and validation.
+- Task creation.
+- Task-link token creation and validation.
 - Upload-slot creation and uploaded asset metadata.
-- Submission validation.
-- Rights status mapping.
-- `project.json` creation.
+- Input completeness validation.
+- Attempt `input.json` creation.
 - `attempt_id` creation.
-- `generation_version` and `latest_eligible_attempt_id` tracking.
 - `StartGenerationCommand`.
-- Status API.
-- Delivery-link API.
-- Conditional lifecycle updates.
+- Task metadata and status APIs.
+- Attempt history API.
+- Artifact download-link API.
 
 ## Out Of Scope
 
@@ -40,89 +38,87 @@ LLD-02 is the source of truth for request lifecycle and attempt metadata.
 - AWS deployment topology beyond API/runtime needs.
 - Customer accounts, payment, marketplace publishing, POD, NFT, or operator review.
 
-## Lifecycle Authority
+## Data Model And Status Ownership
 
-LLD-02 owns the durable request record.
+LLD-02 owns the durable task record and the customer-facing task metadata.
 
-Required states:
+M1 deliberately separates task input status from generation workflow status.
+
+Task status describes whether the immutable customer input is complete:
 
 ```text
 draft
 uploading
-submitted
-validating
-needs_customer_input
-blocked
-generating
-qa_checking
-packaging
-delivered
-failed
-archived
+ready
 ```
 
-State transitions must be conditional and metadata-driven. The system must not infer lifecycle only from S3 object existence.
+Attempt status describes one generation workflow:
 
-## Request Metadata
+```text
+queued
+generating
+ready
+failed
+```
 
-Recommended request record shape:
+The task remains `ready` when an attempt fails. A new attempt may be created with a new refinement note after the current attempt reaches `ready` or `failed`.
+
+Only one attempt may be `queued` or `generating` for a task at a time.
+
+## Task Metadata
+
+Recommended task record shape:
 
 ```json
 {
-  "request_id": "req_01J...",
-  "project_id": "proj_01J...",
-  "project_slug": "kyoto_memory",
-  "product_niche": "travel_memory_cards",
-  "lifecycle_state": "generating",
-  "rights_status": "ready",
-  "generation_version": 1,
-  "latest_eligible_attempt_id": "att_01J...",
-  "attempts": {
-    "att_01J...": {
-      "attempt_id": "att_01J...",
-      "generation_version": 1,
-      "attempt_status": "generating",
-      "project_json_ref": {
-        "bucket": "private-runtime-bucket",
-        "key": "requests/req_01J/project/project_v1.json",
-        "etag": "\"abc123\"",
-        "sha256": "..."
-      },
-      "attempt_output_prefix": "requests/req_01J/generations/v1/attempts/att_01J/",
-      "created_at": "2026-08-22T00:00:00Z"
+  "task_id": "task_01J...",
+  "status": "ready",
+  "current_attempt_id": "att_002",
+  "title": "Spring Walk in Kyoto",
+  "note": "A quiet spring afternoon",
+  "style": "warm_handmade",
+  "photos": [
+    {
+      "asset_id": "asset_01J...",
+      "filename": "kyoto.jpg",
+      "upload_status": "uploaded"
     }
-  },
-  "request_token_hash": "hmac-or-hash",
-  "created_at": "2026-08-22T00:00:00Z",
-  "updated_at": "2026-08-22T00:00:00Z"
+  ],
+  "created_at": "2026-08-24T15:00:00Z",
+  "updated_at": "2026-08-24T15:08:00Z"
 }
 ```
 
-`attempt_id` is execution metadata. It must not be embedded in `project.json` as source truth.
+Task rules:
 
-## Request-Link Token Model
+- A draft task is created before photo upload so the browser has a task identity.
+- The task accepts 1 to 5 photos, one title, one note, and one style.
+- After the task becomes `ready`, these base inputs are immutable.
+- Rights, copyright, and amendment workflows are not part of this first version.
 
-The request link is a bearer credential.
+## Task-Link Token Model
+
+The task link is a bearer credential.
 
 Link format:
 
 ```text
-https://app.example.com/request/{request_id}#access_token={request_access_token}
+https://app.example.com/task/{task_id}#access_token={task_access_token}
 ```
 
 API transport:
 
 ```http
-Authorization: Bearer <request_access_token>
+Authorization: Bearer <task_access_token>
 ```
 
 Rules:
 
 - Store only token hash or HMAC.
-- Do not accept request tokens in query strings, URL paths, cookies, or request bodies.
+- Do not accept task tokens in query strings, URL paths, cookies, or task bodies.
 - Do not log raw tokens.
-- `request_id` alone does not grant access.
-- A valid token grants only status lookup and download-link refresh for that request.
+- `task_id` alone does not grant access.
+- A valid token grants only status lookup and download-link refresh for that task.
 - Lost-link recovery without verified email is not possible.
 
 ## Upload Contract
@@ -159,101 +155,118 @@ Rules:
 
 LLD-02/05 own source-upload layout. LLD-04 does not define source-upload paths.
 
-## `project.json` Contract
+## Asset And Attempt Model
 
-LLD-02 owns `project.json`.
+Each photo is a task-owned asset. Upload slots are temporary; the uploaded asset metadata is durable.
+
+```json
+{
+  "asset_id": "asset_01J...",
+  "task_id": "task_01J...",
+  "filename": "kyoto.jpg",
+  "media_type": "image/jpeg",
+  "size_bytes": 4821930,
+  "upload_status": "uploaded",
+  "storage_ref": {
+    "bucket": "private-runtime-bucket",
+    "key": "tasks/task_01J.../uploads/asset_01J....jpg"
+  }
+}
+```
+
+The browser never receives `storage_ref`.
+
+The user clicks `Generate` to create the first attempt. A refinement creates another attempt only after the current attempt is `ready` or `failed`.
+
+Every attempt stores a complete input snapshot:
+
+```json
+{
+  "attempt_id": "att_002",
+  "task_id": "task_01J...",
+  "attempt_number": 2,
+  "status": "generating",
+  "input_snapshot": {
+    "photo_asset_ids": ["asset_01J..."],
+    "title": "Spring Walk in Kyoto",
+    "note": "A quiet spring afternoon",
+    "style": "warm_handmade",
+    "refinement_note": "Use softer colors and a larger title"
+  },
+  "created_at": "2026-08-24T15:05:00Z",
+  "completed_at": null
+}
+```
+
+`refinement_note` is `null` for attempt 1. The input snapshot is the generation source of truth; a worker does not need to read mutable task fields.
+
+Each attempt produces one M1 customer artifact: a fixed-dimension postcard PNG.
+
+```json
+{
+  "artifact_id": "artifact_01J...",
+  "attempt_id": "att_002",
+  "artifact_type": "postcard",
+  "filename": "spring-walk-in-kyoto.png",
+  "mime_type": "image/png",
+  "width": 1800,
+  "height": 1200,
+  "size_bytes": 1248290,
+  "status": "ready",
+  "storage_ref": {
+    "bucket": "private-runtime-bucket",
+    "key": "tasks/task_01J.../attempts/att_002/postcard.png"
+  }
+}
+```
+
+The browser receives artifact metadata but never receives `storage_ref` until a download URL is explicitly requested.
+
+## Attempt `input.json` Contract
+
+LLD-02 owns the immutable Attempt `input.json` snapshot.
 
 Normative shape:
 
 ```json
 {
-  "schema_version": "m1.project.v1",
-  "request_id": "req_01J...",
-  "project_id": "proj_01J...",
-  "project_slug": "kyoto_memory",
-  "product_niche": "travel_memory_cards",
-  "generation_version": 1,
+  "schema_version": "m1.attempt_input.v1",
+  "task_id": "task_01J...",
   "created_at": "2026-08-22T00:00:00Z",
-  "style": {
-    "style_id": "travel-memory-card",
-    "style_label": "Travel Memory Card",
-    "mood_keywords": ["warm", "handmade", "city-walk"]
-  },
-  "usage_intent": {
-    "primary": "personal_gift",
-    "secondary": ["social_share"]
-  },
-  "travel_notes": {
-    "location_label": "Kyoto",
-    "memory_notes": "short customer-provided notes",
-    "date_or_season": "spring",
-    "caption_text": "optional short caption"
-  },
-  "rights": {
-    "status": "ready",
-    "checklist_ref": {
-      "bucket": "private-runtime-bucket",
-      "key": "requests/req_01J/project/rights_checklist.json"
-    },
-    "flags": []
-  },
-  "source_assets": [
-    {
-      "asset_id": "asset_01",
-      "kind": "photo",
-      "bucket": "private-runtime-bucket",
-      "key": "requests/req_01J/uploads/photo_01.jpg",
-      "media_type": "image/jpeg",
-      "sha256": "...",
-      "width": 3024,
-      "height": 4032
-    }
-  ],
-  "artifact_target_profiles": {
-    "travel_memory_cards_m1_default_v1": {
-      "generation_version": 1,
-      "targets": {
-        "sticker_sheet_png": {
-          "artifact_type": "sticker_sheet",
-          "required": true,
-          "audience": "customer",
-          "format": "png",
-          "expected_filename": "sticker_sheet.png",
-          "package_path": "ai_artist_travel_memory_pack/sticker_sheet/sticker_sheet.png"
-        }
-      }
-    }
-  },
-  "output_targets": [
-    {
-      "target": "sticker_sheet_png",
-      "artifact_type": "sticker_sheet",
-      "format": "png",
-      "profile": "travel_memory_cards_m1_default_v1"
-    }
-  ]
+  "photo_asset_ids": ["asset_01J..."],
+  "title": "Spring Walk in Kyoto",
+  "note": "A quiet spring afternoon",
+  "style": "warm_handmade",
+  "refinement_note": "Use softer colors and a larger title",
+  "output": {
+    "artifact_type": "postcard",
+    "format": "png",
+    "width": 1800,
+    "height": 1200
+  }
 }
 ```
 
 Rules:
 
-- `project.json` must not contain secrets.
-- `attempt_id` is not embedded as project source truth.
-- `artifact_target_profiles` is object-shaped metadata.
-- `output_targets[*].profile` references a key in `artifact_target_profiles`.
-- M1 production delivery must not rely on broad fallback target profiles.
+- `input.json` must not contain secrets.
+- `attempt_id` is execution metadata and is not part of the customer input snapshot.
+- The attempt input snapshot is immutable once generation starts.
+- M1 has one fixed postcard PNG target.
 
 ## Attempt Creation
 
-LLD-02 creates `attempt_id` after submission validation succeeds and rights state is `ready`.
+LLD-02 creates `attempt_id` after the user clicks `Generate` and the task status is `ready`.
 
 Attempt creation must:
 
-- Set `generation_version`.
-- Set `latest_eligible_attempt_id`.
-- Write immutable `project_json_ref`.
-- Compute canonical `attempt_output_prefix`.
+- Increment `attempt_number`.
+- Write the complete immutable input snapshot.
+- Persist it at `tasks/{task_id}/attempts/{attempt_id}/input.json` and record its checksum.
+- Set the new attempt as `current_attempt_id`.
 - Trigger LLD-03 with `StartGenerationCommand`.
+
+LLD-02 must reject creation of a new attempt while another attempt for the task is `queued` or `generating`.
 
 ## `StartGenerationCommand`
 
@@ -262,37 +275,101 @@ LLD-02 emits this command to LLD-03.
 ```json
 {
   "command_version": "m1.start_generation.v1",
-  "request_id": "req_01J...",
-  "project_id": "proj_01J...",
-  "generation_version": 1,
+  "task_id": "task_01J...",
   "attempt_id": "att_01J...",
-  "project_json_ref": {
+  "input_snapshot_ref": {
     "bucket": "private-runtime-bucket",
-    "key": "requests/req_01J/project/project_v1.json",
-    "etag": "\"abc123\"",
+    "key": "tasks/task_01J/attempts/att_01J/input.json",
     "sha256": "..."
   },
-  "attempt_output_prefix": "requests/req_01J/generations/v1/attempts/att_01J/",
-  "idempotency_key": "req_01J:generation_v1:attempt_att_01J:project_sha256_abcd",
-  "requested_by": "backend_api",
+  "source_asset_ids": ["asset_01J..."],
+  "output_prefix": "tasks/task_01J/attempts/att_01J/",
+  "idempotency_key": "task_01J:attempt_att_01J",
   "created_at": "2026-08-22T00:00:00Z"
 }
 ```
 
-LLD-03 must carry `project_json_ref` unchanged into `GenerationCompleted`.
+LLD-03 directly updates the Attempt status. M1 does not require a `GenerationCompleted` or `GenerationFailed` event handoff to LLD-04.
 
-## Status API
+## Customer API Contract
+
+All task-scoped APIs require the bearer task token. The create-task API is the only response that returns the raw access token.
+
+### Create Task
+
+```http
+POST /v1/tasks
+```
+
+Creates a `draft` task before any photos are uploaded.
+
+Response includes:
+
+```json
+{
+  "task_id": "task_01J...",
+  "status": "draft",
+  "access_token": "returned_once"
+}
+```
+
+### Upload Slots
+
+```http
+POST /v1/tasks/{task_id}/upload-slots
+```
+
+Creates server-owned short-lived upload slots for 1 to 5 photos. The browser uploads directly to private S3 and then confirms each uploaded asset through:
+
+```http
+POST /v1/tasks/{task_id}/assets/{asset_id}/complete
+```
+
+The backend validates the stored object before marking the asset `uploaded`.
+
+### Generate And Refine
+
+The first generation is created by:
+
+```http
+POST /v1/tasks/{task_id}/generate
+```
+
+The task must be `ready`; this creates Attempt 1.
+
+Later attempts are created by:
+
+```http
+POST /v1/tasks/{task_id}/attempts
+```
+
+The body contains only:
+
+```json
+{
+  "refinement_note": "Use softer colors and a larger title"
+}
+```
+
+The backend copies the immutable task inputs into the new attempt snapshot and rejects the call while another attempt is `queued` or `generating`.
+
+### Task Metadata And Status
 
 Status responses must be customer-safe.
 
+`GET /v1/tasks/{task_id}` returns the task input, task status, current attempt status, and current artifacts.
+
 Allowed customer fields:
 
-- Request state.
+- Task status: `draft`, `uploading`, or `ready`.
+- Task input: title, note, style, photo count, and uploaded photo filenames.
+- Current attempt ID and attempt number.
+- Current attempt status: `queued`, `generating`, `ready`, or `failed`.
+- Current refinement note.
 - Customer-safe reason code.
 - Upload progress.
 - Whether action is needed.
-- Whether download is available.
-- Final package name and file list when delivered.
+- Artifact metadata: artifact ID, filename, type, dimensions, MIME type, and readiness.
 
 Disallowed customer fields:
 
@@ -301,22 +378,24 @@ Disallowed customer fields:
 - Stack traces.
 - Provider errors.
 - Raw prompt text.
-- Request token hash.
+- Task token hash.
 - Presigned URL internals.
+
+`GET /v1/tasks/{task_id}/attempts` returns attempt history. Each item includes attempt ID, attempt number, status, refinement note, timestamps, and artifact metadata. Old artifacts remain downloadable by artifact ID.
 
 ## Download-Link API
 
-When a request is `delivered`, LLD-02 creates a fresh short-lived download URL for:
+`POST /v1/tasks/{task_id}/artifacts/{artifact_id}/download` creates a fresh short-lived download URL for a ready artifact owned by that task.
 
 ```text
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/package/final_download_pack.zip
+tasks/{task_id}/attempts/{attempt_id}/postcard.png
 ```
 
 Rules:
 
-- The request token must authorize only that request.
+- The task token must authorize only that task.
 - Download URLs are short-lived.
-- The API must verify delivery metadata points to the latest eligible delivered attempt.
+- The artifact must belong to the task and have status `ready`.
 - Do not issue customer download URLs for source photos or internal artifacts.
 
 ## Dependencies
@@ -325,32 +404,31 @@ LLD-02 depends on:
 
 - LLD-01 for intake fields and customer-safe state display needs.
 - LLD-03 for generation command consumption and completion/failure events.
-- LLD-04 for delivery metadata, QA/package results, and final ZIP reference.
+- LLD-04 for artifact readiness metadata.
 - LLD-05 for runtime storage prefix, IAM, retention, token logging constraints, and presigned URL posture.
 
 LLD-02 provides:
 
-- Request lifecycle authority.
-- `project.json`.
+- Task input status authority.
+- Attempt `input.json`.
 - Attempt metadata.
-- `latest_eligible_attempt_id`.
 - Upload/download APIs.
 - Token model.
 
 ## Acceptance Checks
 
-- Request tokens are hash-only server side and never accepted in query/path/cookie/body.
+- Task tokens are hash-only server side and never accepted in query/path/cookie/body.
 - Upload slots use server-owned private keys and short TTLs.
-- `project.json` uses `m1.project.v1`, object-shaped `artifact_target_profiles`, and `output_targets[*].profile`.
-- `attempt_id` is not embedded in `project.json`.
-- `StartGenerationCommand` includes `project_json_ref` and canonical attempt output prefix.
-- Lifecycle transitions are conditional.
-- Download links target only the delivered attempt's `package/final_download_pack.zip`.
-- No accounts, payment, marketplace, POD, NFT, public gallery, or operator gate is introduced.
+- Attempt `input.json` contains the complete input snapshot and one fixed postcard PNG target.
+- Every attempt has an immutable input snapshot and a refinement note.
+- `StartGenerationCommand` includes `attempt_id` and an attempt-scoped output prefix.
+- Only one attempt per task can be `queued` or `generating`.
+- Download links target only ready postcard artifacts owned by the task.
+- No accounts, payment, marketplace, POD, NFT, public gallery, rights workflow, or operator gate is introduced.
 
 ## Open Questions
 
 - Final upload MIME types and byte limits.
 - Exact support behavior for failed downloads.
 - Whether optional email delivery is enabled for demo.
-- Exact conditional update API exposed to workers.
+- Whether API errors use a single structured error envelope.

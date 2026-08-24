@@ -7,49 +7,51 @@
 | LLD | LLD-01 |
 | Product milestone | M1: `Memory Product Pack Agent` |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Reviewer reconfirmed signoff |
-| Scope owner | Customer website intake, upload UX, status UX, delivery UX, and customer-safe copy |
+| Status | Tech Lead agreed draft; cross-LLD reconfirmation pending |
+| Scope owner | Customer website intake, upload UX, status UX, refinement UX, and artifact delivery |
 
 ## Purpose
 
-LLD-01 defines the customer-facing website flow for M1. The website guides a non-technical user from product understanding through intake, upload, submission, status tracking, and final pack download.
+LLD-01 defines the customer-facing website flow for creating a postcard-style artifact from 1 to 5 photos and a small set of creative inputs.
 
-The website is not a marketplace, account portal, operator dashboard, or generic image-generation playground. It is a focused creative product generator for travel-memory packs.
+The website is not a marketplace, account portal, operator dashboard, or generic image-generation playground.
 
 ## In Scope
 
 - Public product-start page.
+- Draft task creation before upload.
 - Guided intake for 1 to 5 photos.
 - Upload UI using backend-issued upload slots.
-- Travel notes, style choice, usage intent, rights checklist, and output metadata collection.
-- Review and submit screen.
-- Request status screen.
-- Delivery screen for `final_download_pack.zip`.
-- Customer-safe copy for `needs_customer_input`, `blocked`, `failed`, and `delivered`.
-- Optional email-assisted status-link UX if LLD-02/05 enable email.
+- `title`, `note`, and `style` collection.
+- Generate action that creates Attempt 1.
+- Refinement action that accepts only `refinement_note`.
+- Task input status and current attempt status.
+- Attempt history view.
+- Delivery of a fixed-dimension postcard PNG artifact.
 
 ## Out Of Scope
 
 - Accounts, login, dashboards, or public galleries.
 - Payment, checkout, subscriptions, or usage credits.
+- Rights, copyright, or license workflows in this first version.
 - Marketplace publishing, listing drafts, POD, NFT, fulfillment, or buyer messaging.
 - Operator review UI.
-- Exposing internal artifacts.
+- Exposing internal artifacts or storage references.
 - Direct customer control over S3 object keys, attempt IDs, or runtime prefixes.
 
 ## Primary User Flow
 
 ```mermaid
 flowchart LR
-  Start["Start"] --> Intake["Guided Intake"]
+  Start["Start"] --> Draft["Create Draft"]
+  Draft --> Intake["Guided Intake"]
   Intake --> Upload["Upload 1-5 Photos"]
-  Upload --> Rights["Rights Checklist"]
-  Rights --> Review["Review And Submit"]
-  Review --> Status["Status"]
-  Status --> Delivery["Delivery"]
-  Status --> NeedsInput["Needs Customer Input"]
-  Status --> Blocked["Blocked"]
-  Status --> Failed["Failed"]
+  Upload --> Ready["Input Ready"]
+  Ready --> Generate["Generate"]
+  Generate --> Status["Attempt Status"]
+  Status --> Refine["Add Refinement"]
+  Refine --> Status
+  Status --> Delivery["Download Artifact"]
 ```
 
 ## Screens
@@ -58,21 +60,13 @@ flowchart LR
 
 Goals:
 
-- Show the concrete M1 output: sticker sheet, postcard, poster, and social preview.
-- Set rights expectations before upload.
-- Avoid marketplace income claims.
-- Avoid paid-plan or seller-pack language in M1 core.
+- Show the concrete M1 output: a postcard-style PNG.
+- Explain that users provide photos, title, note, and style.
+- Avoid marketplace income claims and seller-pack language.
 
-Customer-visible artifact list:
+Customer-visible artifact:
 
-- `sticker_sheet.png`
-- `sticker_sheet.pdf`
-- `postcard.png`
-- `postcard.pdf`
-- `poster.png`
-- `poster.pdf`
-- `social_preview.png`
-- `final_download_pack.zip`
+- One fixed-dimension postcard PNG.
 
 ### Guided Intake
 
@@ -80,19 +74,16 @@ Required fields:
 
 | Field | Purpose |
 | --- | --- |
-| `photos` | 1 to 5 user-owned or user-permitted photos. |
-| `travel_notes.location_label` | Customer-readable location or memory label. |
-| `travel_notes.memory_notes` | Short notes that guide style and captions. |
-| `style.style_id` | M1-approved visual direction. |
-| `usage_intent.primary` | Personal gift, social share, or draft digital-product exploration. |
-| `rights` | Checklist answers used by LLD-02 validation. |
-| `output_metadata` | Customer-friendly output preferences within M1 limits. |
+| `photos` | 1 to 5 uploaded photos. |
+| `title` | Customer-provided artifact title. |
+| `note` | Customer-provided creative note. |
+| `style` | M1-approved visual direction. |
 
-The UI may mirror backend constraints but must treat LLD-02 validation as authoritative.
+The UI may mirror backend constraints but must treat LLD-02 validation as authoritative. Once the task is `ready`, these base inputs and the photo set are immutable.
 
 ### Upload
 
-The browser must never choose storage keys. The upload UI receives upload slots from LLD-02 and uploads directly through short-lived presigned POST or equivalent URLs.
+The browser requests upload slots from LLD-02 and uploads directly through short-lived presigned POST or equivalent URLs.
 
 UX requirements:
 
@@ -100,146 +91,124 @@ UX requirements:
 - Show accepted media types and size limits from public config.
 - Expire stale upload slots gracefully.
 - Let the user retry a failed upload with a fresh backend-issued slot.
-- Do not expose private bucket names, object keys, signed URL query strings, or request tokens.
+- Do not expose private bucket names, object keys, signed URL query strings, or task tokens.
 
-### Review And Submit
+### Generate And Refine
 
-The review screen shows:
+The Generate screen shows:
 
 - Photo count.
-- Style label.
-- Travel-memory notes summary.
-- Rights checklist summary.
-- Expected M1 output list.
+- Title, note, and style.
+- Expected fixed-dimension postcard PNG output.
 
-The review screen must not:
+The first `Generate` action creates Attempt 1. A later refinement action accepts only `refinement_note` and creates a new attempt after the current attempt is `ready` or `failed`.
 
-- Promise marketplace readiness.
-- Promise income or sales.
-- Mention internal artifacts as customer deliverables.
-- Show raw S3 keys or attempt metadata.
+Only one attempt may be `queued` or `generating` for a task at a time.
 
 ### Status
 
-The UI maps internal lifecycle states to customer-safe labels.
+The UI displays task input status separately from current attempt status.
 
-| Internal state | Customer behavior |
+Task status:
+
+| Status | Customer behavior |
 | --- | --- |
-| `draft` | Local intake has not been submitted. |
-| `uploading` | Uploads are in progress or upload slots are active. |
-| `submitted` | Request received. |
-| `validating` | Inputs and rights checklist are being checked. |
-| `needs_customer_input` | Ask for clarification or replacement where supported. |
-| `blocked` | Explain that M1 cannot process the request under rights or scope guardrails. |
-| `generating` | Creative pack is being generated. |
-| `qa_checking` | Generated files are being checked. |
-| `packaging` | Final download pack is being prepared. |
-| `delivered` | Download is available. |
-| `failed` | Technical failure or retry/support path. |
-| `archived` | Request is no longer downloadable. |
+| `draft` | Required text fields or photos are incomplete. |
+| `uploading` | Photos are being uploaded. |
+| `ready` | Input is complete and can generate or refine. |
 
-The UI should not expose:
+Attempt status:
 
-- `manifest.json`.
-- `quality_report.json`.
-- `rights_checklist.json`.
-- `generation_manifest.json`.
-- Prompt logs.
-- Generation notes.
-- Stack traces.
-- Raw failure payloads.
-- S3 keys.
+| Status | Customer behavior |
+| --- | --- |
+| `queued` | Generation is waiting to start. |
+| `generating` | Postcard artifact is being generated. |
+| `ready` | Artifact is available. |
+| `failed` | Generation failed; refinement or retry is available. |
+
+The UI may display attempt history from `GET /v1/tasks/{task_id}/attempts`. The current attempt is shown by default; previous ready artifacts remain downloadable.
+
+The UI must not expose:
+
+- S3 keys or bucket names.
+- Presigned URL internals.
+- Prompt logs, provider errors, or stack traces.
+- Internal generation or operational metadata.
 
 ### Delivery
 
-The delivery screen requests a fresh download URL from LLD-02 when the request is `delivered`.
+The delivery screen requests a fresh download URL for a ready postcard artifact.
 
 Rules:
 
-- Display package name: `final_download_pack.zip`.
-- Display the customer artifact list.
-- Refresh expired download links through the status/download API.
+- Display the artifact filename and dimensions.
+- Refresh expired download links through the artifact download API.
 - Do not place raw presigned URLs in copy, logs, or emails.
-- Do not expose internal artifacts.
 
-## Request-Link Security UX
+## Task-Link Security UX
 
-Default delivery is request-link-only.
+Default delivery is task-link-only.
 
-The request link format is:
+The task link format is:
 
 ```text
-https://app.example.com/request/{request_id}#access_token={request_access_token}
+https://app.example.com/task/{task_id}#access_token={task_access_token}
 ```
 
 The frontend extracts the URL fragment and sends the token only in:
 
 ```http
-Authorization: Bearer <request_access_token>
+Authorization: Bearer <task_access_token>
 ```
 
 Rules:
 
 - Prefer in-memory token storage.
-- `sessionStorage` is allowed only to survive refresh.
-- `localStorage` is not allowed.
+- `sessionStorage` is acceptable only to survive refresh.
+- `localStorage` is prohibited.
 - Do not put tokens in query strings, paths, cookies, analytics, or visible support copy.
-- If optional email is disabled and the link is lost, the customer must start a new request.
-- If optional email recovery is enabled, recovery semantics are owned by LLD-02/05 and must avoid enumeration.
+- If the link is lost, the customer must start a new task.
 
 ## Customer-Safe Copy Rules
 
-`needs_customer_input`:
-
-- Explain what the customer can fix.
-- If amendment is supported, guide the customer to replace files or clarify inputs.
-- If amendment is not supported, guide the customer to start a new request.
-
-`blocked`:
-
-- Explain M1 rights/scope guardrails.
-- Avoid legal conclusions.
-- Do not offer manual override.
-
 `failed`:
 
-- Present as a technical issue or retry path.
-- Avoid stack traces.
-- Do not expose provider internals.
+- Present the issue as a technical failure or retry path.
+- Avoid stack traces and provider internals.
 
-`delivered`:
+`ready`:
 
-- Show download availability and included file list.
+- Show artifact availability and the download action.
 - Avoid public bucket language.
 
 ## Dependencies
 
 LLD-01 depends on:
 
-- LLD-02 for request creation, upload slots, status API, token validation, lifecycle states, and download-link API.
-- LLD-04 for final package metadata and customer-safe delivery readiness.
-- LLD-05 for request-link constraints, public runtime config, no-store/cache/referrer policy requirements, and optional email enablement.
+- LLD-02 for task creation, upload slots, input validation, task status, attempt creation, status metadata, token validation, attempt history, and artifact download links.
+- LLD-03/04 for artifact generation and readiness metadata.
+- LLD-05 for task-link constraints, public runtime config, no-store/cache/referrer policy requirements, and private storage.
 
 LLD-01 provides:
 
-- Customer-facing labels and state expectations.
-- UX constraints for upload retry and download refresh.
-- Copy boundaries for rights, failed, blocked, and delivered states.
+- Customer-facing task and attempt status labels.
+- UX constraints for upload retry and artifact download refresh.
+- Refinement behavior and customer-safe failure copy.
 
 ## Acceptance Checks
 
-- A user can complete intake with 1 to 5 valid photos.
-- The UI submits only M1-supported fields.
+- A user can create a draft, upload 1 to 5 photos, enter title/note/style, and reach task status `ready`.
+- The first Generate action creates Attempt 1.
+- A refinement submits only `refinement_note` and creates a later attempt only when no attempt is queued or generating.
 - The UI does not expose internal artifacts or private storage details.
-- Request tokens use fragment-to-Authorization-header transport.
-- Status screens cover all HLD lifecycle states.
-- Delivery uses a fresh short-lived download URL.
-- The UI does not introduce accounts, payment, marketplace publishing, POD, NFT, public gallery, or operator review.
-- Customer-visible copy treats compliance as a risk checklist, not legal advice.
+- Task tokens use fragment-to-Authorization-header transport.
+- Status screens distinguish task status from attempt status.
+- Attempt history is viewable and previous ready artifacts remain downloadable.
+- Delivery uses a fresh short-lived artifact download URL.
+- The UI does not introduce accounts, payment, marketplace publishing, POD, NFT, public gallery, rights workflow, or operator review.
 
 ## Open Questions
 
-- Should optional SES email be enabled for demo or deferred?
 - What exact public domain and route structure should demo use?
-- Should warning-only QA results ever appear as curated customer copy?
-- What support route is used for failed or expired downloads?
+- What are the fixed postcard PNG dimensions?
+- What style IDs are included in the first demo?
