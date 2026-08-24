@@ -7,7 +7,7 @@
 | LLD | LLD-01 |
 | Product milestone | M1: `Memory Product Pack Agent` |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Tech Lead agreed draft; cross-LLD reconfirmation pending |
+| Status | Implementation-ready draft |
 | Scope owner | Customer website intake, upload UX, status UX, refinement UX, and artifact delivery |
 
 ## Purpose
@@ -79,6 +79,8 @@ Required fields:
 | `note` | Customer-provided creative note. |
 | `style` | M1-approved visual direction. |
 
+The first demo exposes one style ID: `warm_handmade`.
+
 The UI may mirror backend constraints but must treat LLD-02 validation as authoritative. Once the task is `ready`, these base inputs and the photo set are immutable.
 
 ### Upload
@@ -88,7 +90,7 @@ The browser requests upload slots from LLD-02 and uploads directly through short
 UX requirements:
 
 - Show per-photo upload progress.
-- Show accepted media types and size limits from public config.
+- Accept only JPEG and PNG photos, up to 20 MB per photo and 5 photos per Task.
 - Expire stale upload slots gracefully.
 - Let the user retry a failed upload with a fresh backend-issued slot.
 - Do not expose private bucket names, object keys, signed URL query strings, or task tokens.
@@ -186,7 +188,7 @@ Rules:
 LLD-01 depends on:
 
 - LLD-02 for task creation, upload slots, input validation, task status, attempt creation, status metadata, token validation, attempt history, and artifact download links.
-- LLD-03/04 for artifact generation and readiness metadata.
+- LLD-03 for artifact generation and readiness metadata.
 - LLD-05 for task-link constraints, public runtime config, no-store/cache/referrer policy requirements, and private storage.
 
 LLD-01 provides:
@@ -209,6 +211,4 @@ LLD-01 provides:
 
 ## Open Questions
 
-- What exact public domain and route structure should demo use?
-- What are the fixed postcard PNG dimensions?
-- What style IDs are included in the first demo?
+None. Public domain and route structure are deployment parameters.

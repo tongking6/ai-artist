@@ -7,7 +7,7 @@
 | LLD | LLD-03 |
 | Product milestone | M1: `Memory Product Pack Agent` |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Tech Lead agreed draft; cross-LLD reconfirmation pending |
+| Status | Implementation-ready draft |
 | Scope owner | Postcard generation, minimum output verification, artifact metadata, and Attempt status updates |
 
 ## Purpose
@@ -88,6 +88,7 @@ Rules:
 - `source_asset_ids` must match the snapshot photo references.
 - A duplicate command with the same `idempotency_key` must not create a second artifact.
 - Platform invocation IDs may be used in logs only; they are not domain fields or cross-service contract fields.
+- On redelivery, the worker first checks the Attempt and expected output prefix; an existing valid artifact is reused and the Attempt is finalized without generating a second artifact.
 
 ## Worker Flow
 
@@ -275,7 +276,6 @@ LLD-03 provides:
 - The fake provider runs without external credentials.
 - No ZIP, PDF, multi-artifact, marketplace, POD, NFT, or publishing side effect is introduced.
 
-## Open Questions
+## Deferred Provider Note
 
-- Final upload MIME types and byte limits remain owned by LLD-02/05.
-- Whether the real provider is enabled in the first deployed demo remains a runtime decision.
+None for the M1 fake-provider path. A real provider remains a later adapter/configuration decision.

@@ -7,7 +7,7 @@
 | LLD | LLD-05 |
 | Product milestone | M1: Memory Product Pack Agent |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Tech Lead agreed draft; cross-LLD reconfirmation pending |
+| Status | Implementation-ready draft |
 | Scope owner | AWS runtime, private storage, `Task`-link security, SQS generation delivery, and retention |
 
 ## Purpose
@@ -24,7 +24,7 @@ LLD-05 defines the minimum AWS runtime and security posture for the M1 `Task` ->
 - Presigned upload/download constraints.
 - IAM boundaries.
 - Basic CloudWatch logging.
-- Simple retention and cleanup.
+- SQS DLQ retention for failed generation commands.
 
 ## Out Of Scope
 
@@ -96,8 +96,10 @@ SQS rules:
 
 - Messages include task_id, attempt_id, input_snapshot_ref, source_asset_ids, output_prefix, and idempotency_key.
 - Visibility timeout exceeds the expected maximum generation duration.
+- M1 visibility timeout is 10 minutes.
 - Redelivery is safe and must not create duplicate artifacts.
-- Failed messages go to the DLQ after the configured receive limit.
+- Failed messages go to the DLQ after 3 receives.
+- DLQ messages are retained for 14 days.
 - M1 does not use a second QA/package queue.
 
 ## Storage Privacy And Encryption
@@ -135,6 +137,7 @@ Rules:
 - Prefer memory; sessionStorage is allowed only for page refresh.
 - task_id alone grants no access.
 - The token authorizes only the associated `Task`.
+- The token is valid for 30 days from Task creation.
 - Lost links require a new `Task` in M1.
 - `Task`/status/download responses use Cache-Control: no-store and Referrer-Policy: no-referrer.
 - M1 task routes load no analytics pixels, tag managers, chat widgets, external fonts, or third-party scripts.
@@ -178,7 +181,6 @@ Rules:
 | Backend API Lambda | `Task` metadata, upload/download URL creation, and SQS send |
 | Generation Lambda | Read `Task` inputs/source uploads, write current `Attempt` output, update current `Attempt` |
 | SQS | Deliver generation commands |
-| Cleanup process | Delete expired `Task` objects and metadata |
 
 Generation Lambda must not issue customer download URLs or modify unrelated `Task`s.
 
@@ -196,8 +198,8 @@ Backend:
 | AI_ARTIST_GENERATION_DLQ_URL | SQS dead-letter queue |
 | AI_ARTIST_UPLOAD_URL_TTL_SECONDS | Upload URL TTL |
 | AI_ARTIST_DOWNLOAD_URL_TTL_SECONDS | Download URL TTL |
-| AI_ARTIST_GENERATION_MODE | fake or provider |
-| AI_ARTIST_RETENTION_DAYS | Active-data retention |
+| AI_ARTIST_TASK_TOKEN_TTL_SECONDS | Fixed at 2592000 seconds (30 days) |
+| AI_ARTIST_GENERATION_MODE | `fake` for M1; real provider is deferred |
 | LOG_LEVEL | Basic log verbosity |
 
 Secrets live in environment variables or AWS Secrets Manager.
@@ -210,25 +212,13 @@ Keep only:
 - API Gateway 5xx logs.
 - Lambda error/throttle logs.
 - SQS receive count and DLQ messages.
-- Generation and cleanup failure logs with task_id and attempt_id.
+- Generation failure logs with task_id and attempt_id.
 
 Logs must not include tokens, signed URLs, secrets, raw photos, or unnecessary private notes. No dashboards or complex metrics taxonomy are required.
 
 ## Retention
 
-Retention is based on last `Task` activity:
-
-| Data | Retention |
-| --- | --- |
-| Unfinished draft uploads | 24 hours |
-| Source photos | 30 days |
-| `Attempt` `input.json` | 30 days |
-| All postcard artifacts | 30 days |
-| `Task` metadata | 30 days |
-| CloudWatch logs | 30 days |
-| SQS DLQ messages | 14 days |
-
-All `Attempt`s remain downloadable during the 30-day window. M1 may use S3 lifecycle rules plus a simple scheduled cleanup process. No archive tier is required.
+M1 does not implement application-data cleanup, archive, or complex recovery. Task tokens expire 30 days after Task creation. SQS DLQ messages are retained for 14 days.
 
 ## Acceptance Checks
 
@@ -242,9 +232,6 @@ All `Attempt`s remain downloadable during the 30-day window. M1 may use S3 lifec
 - Logs do not expose secrets or private customer content.
 - SES, WAF, Step Functions, rights workflows, ZIP packaging, and complex observability are not required.
 
-## Open Questions
+## Deployment Parameters
 
-- AWS region and demo domain.
-- Final upload MIME types and byte limits.
-- Whether the deployed demo uses fake or real provider.
-- Exact SQS visibility timeout and max receive count.
+No remaining M1 runtime contract questions. AWS region and demo domain are deployment parameters.

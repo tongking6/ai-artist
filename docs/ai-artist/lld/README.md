@@ -6,17 +6,17 @@
 | --- | --- |
 | Product milestone | M1: Memory Product Pack Agent |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Simplified M1 design agreed; implementation contracts pending final reconciliation |
+| Status | Simplified M1 design agreed; implementation-ready draft |
 | Scope | Website Task intake, postcard generation, minimum runtime, and private artifact download |
 
 ## Active LLD Set
 
 | LLD | Title | Status |
 | --- | --- | --- |
-| [LLD-01](./milestone-1-lld-01-website-intake-status-delivery.md) | Website Task Intake, Status, Refinement, and Delivery UX | Agreed draft |
-| [LLD-02](./milestone-1-lld-02-backend-api-lifecycle.md) | Backend API, Task Data Model, Attempts, Upload/Download Links | Agreed draft |
-| [LLD-03](./milestone-1-lld-03-generation-worker.md) | Postcard Generation Worker and Minimum Verification | Agreed draft |
-| [LLD-05](./milestone-1-lld-05-runtime-security-ops.md) | AWS Runtime, Storage, Security, SQS, and Retention | Agreed draft |
+| [LLD-01](./milestone-1-lld-01-website-intake-status-delivery.md) | Website Task Intake, Status, Refinement, and Delivery UX | Implementation-ready draft |
+| [LLD-02](./milestone-1-lld-02-backend-api-lifecycle.md) | Backend API, Task Data Model, Attempts, Upload/Download Links | Implementation-ready draft |
+| [LLD-03](./milestone-1-lld-03-generation-worker.md) | Postcard Generation Worker and Minimum Verification | Implementation-ready draft |
+| [LLD-05](./milestone-1-lld-05-runtime-security-ops.md) | AWS Runtime, Storage, Security, SQS, and Retention | Implementation-ready draft |
 
 [LLD-04](./milestone-1-lld-04-qa-packaging-delivery.md) is deferred and is not part of the M1 execution path.
 
@@ -96,12 +96,16 @@ The browser sends the token as:
 Authorization: Bearer <task_access_token>
 ```
 
+All task-scoped APIs require this bearer token. The token is valid for 30 days from Task creation.
+
+M1 upload limits are `image/jpeg` or `image/png`, up to 20 MB per photo and 5 photos per Task.
+
 Customer download is a fresh short-lived URL for a ready postcard Artifact only.
 
 ## Implementation Order
 
 1. LLD-02 Task/Asset/Attempt persistence and customer API.
-2. LLD-05 minimal AWS runtime, private buckets, DynamoDB, SQS, DLQ, and retention.
+2. LLD-05 minimal AWS runtime, private buckets, DynamoDB, SQS, and DLQ retention.
 3. LLD-01 website intake, upload, status, refinement, and download UX.
 4. LLD-03 deterministic fake-provider generation and minimum verification.
 5. End-to-end verification for one-photo, five-photo, refinement, failure, and artifact download flows.

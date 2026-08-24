@@ -7,7 +7,7 @@
 | LLD | LLD-02 |
 | Product milestone | M1: `Memory Product Pack Agent` |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Tech Lead agreed draft; cross-LLD reconfirmation pending |
+| Status | Implementation-ready draft |
 | Scope owner | Backend API, lifecycle, token model, upload/download contracts, attempt input snapshots, and attempt metadata |
 
 ## Purpose
@@ -118,7 +118,8 @@ Rules:
 - Do not accept task tokens in query strings, URL paths, cookies, or task bodies.
 - Do not log raw tokens.
 - `task_id` alone does not grant access.
-- A valid token grants only status lookup and download-link refresh for that task.
+- A valid token grants access to all task-scoped APIs for that task, including upload, asset completion, generation, status, attempt history, and download-link refresh.
+- The token is valid for 30 days from Task creation.
 - Lost-link recovery without verified email is not possible.
 
 ## Upload Contract
@@ -139,8 +140,8 @@ Recommended upload slot shape:
     "x-amz-signature": "..."
   },
   "constraints": {
-    "accepted_media_types": ["image/jpeg", "image/png", "image/heic"],
-    "max_bytes": 20971520
+    "accepted_media_types": ["image/jpeg", "image/png"],
+  "max_bytes": 20971520
   }
 }
 ```
@@ -151,6 +152,7 @@ Rules:
 - Upload URLs are short-lived.
 - Uploaded asset metadata is recorded before submission.
 - Uploads must be private.
+- M1 accepts at most 5 photos per Task.
 - Upload metadata must not include raw customer notes or unnecessary PII.
 
 LLD-02/05 own source-upload layout. LLD-04 does not define source-upload paths.
@@ -404,7 +406,7 @@ LLD-02 depends on:
 
 - LLD-01 for intake fields and customer-safe state display needs.
 - LLD-03 for generation command consumption and completion/failure events.
-- LLD-04 for artifact readiness metadata.
+- LLD-03 for artifact readiness metadata and Attempt status updates.
 - LLD-05 for runtime storage prefix, IAM, retention, token logging constraints, and presigned URL posture.
 
 LLD-02 provides:
@@ -426,9 +428,7 @@ LLD-02 provides:
 - Download links target only ready postcard artifacts owned by the task.
 - No accounts, payment, marketplace, POD, NFT, public gallery, rights workflow, or operator gate is introduced.
 
-## Open Questions
+## Fixed Error Behavior
 
-- Final upload MIME types and byte limits.
-- Exact support behavior for failed downloads.
-- Whether optional email delivery is enabled for demo.
-- Whether API errors use a single structured error envelope.
+- A missing or not-ready artifact returns `409 artifact_not_ready` with `retryable: true`; an artifact that does not belong to the Task returns `404 artifact_not_found` with `retryable: false`.
+- API errors use `{ "code": "...", "message": "...", "retryable": true|false }`.
