@@ -81,7 +81,7 @@ Required fields:
 
 The first demo exposes one style ID: `warm_handmade`.
 
-The UI may mirror backend constraints but must treat LLD-02 validation as authoritative. Once the task is `ready`, these base inputs and the photo set are immutable.
+The UI saves title, note, and style through `PATCH /v1/tasks/{task_id}`. It may mirror backend constraints but must treat LLD-02 validation as authoritative. Once the task is `ready`, these base inputs and the photo set are immutable.
 
 ### Upload
 
@@ -91,6 +91,7 @@ UX requirements:
 
 - Show per-photo upload progress.
 - Accept only JPEG and PNG photos, up to 20 MB per photo and 5 photos per Task.
+- Request the desired total photo count in the upload-slots request.
 - Expire stale upload slots gracefully.
 - Let the user retry a failed upload with a fresh backend-issued slot.
 - Do not expose private bucket names, object keys, signed URL query strings, or task tokens.

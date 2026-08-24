@@ -93,7 +93,9 @@ Task rules:
 
 - A draft task is created before photo upload so the browser has a task identity.
 - The task accepts 1 to 5 photos, one title, one note, and one style.
+- The Task status is `ready` only when title, note, style, and 1 to 5 uploaded photos are complete.
 - After the task becomes `ready`, these base inputs are immutable.
+- After any Attempt exists, these base inputs are immutable.
 - Rights, copyright, and amendment workflows are not part of this first version.
 
 ## Task-Link Token Model
@@ -315,19 +317,63 @@ Response includes:
 }
 ```
 
+### Update Task Metadata
+
+```http
+PATCH /v1/tasks/{task_id}
+Authorization: Bearer <task_access_token>
+```
+
+Updates the customer-provided Task metadata before generation.
+
+Request body:
+
+```json
+{
+  "title": "Spring Walk in Kyoto",
+  "note": "A quiet spring afternoon",
+  "style": "warm_handmade"
+}
+```
+
+Rules:
+
+- The body may contain only `title`, `note`, and `style`.
+- Each provided field must be a non-empty valid value; omitted fields remain unchanged.
+- The endpoint is allowed only while the Task is `draft` or `uploading` and before any Attempt exists.
+- It returns a conflict once the Task is `ready` or any Attempt exists.
+- After the update, the backend recalculates Task status from metadata completeness and uploaded Asset count.
+
 ### Upload Slots
 
 ```http
 POST /v1/tasks/{task_id}/upload-slots
 ```
 
-Creates server-owned short-lived upload slots for 1 to 5 photos. The browser uploads directly to private S3 and then confirms each uploaded asset through:
+Request body:
+
+```json
+{
+  "photo_count": 3
+}
+```
+
+`photo_count` is the requested total number of photos for the Task and must be an integer from 1 through 5. The backend creates server-owned short-lived upload slots until the Task has that many uploaded or pending Assets. The browser uploads directly to private S3 and then confirms each uploaded asset through:
 
 ```http
 POST /v1/tasks/{task_id}/assets/{asset_id}/complete
 ```
 
 The backend validates the stored object before marking the asset `uploaded`.
+
+Upload-slot rules:
+
+- The endpoint is allowed while the Task is `draft` or `uploading`, before any Attempt exists.
+- Repeated requests may be made while intake is incomplete.
+- Unexpired pending slots are reused; new slots are created only for the missing count.
+- The backend rejects a request below the number of already uploaded Assets.
+- The backend rejects any request that would exceed 5 uploaded or pending Assets.
+- Once the requested Assets are uploaded and title, note, and style are complete, the Task becomes `ready`.
 
 ### Generate And Refine
 
@@ -419,7 +465,10 @@ LLD-02 provides:
 ## Acceptance Checks
 
 - Task tokens are hash-only server side and never accepted in query/path/cookie/body.
+- `PATCH /v1/tasks/{task_id}` persists only title, note, and style before the Task is ready or any Attempt exists.
+- Task status becomes `ready` only when metadata is complete and 1 to 5 Assets are uploaded.
 - Upload slots use server-owned private keys and short TTLs.
+- `POST /v1/tasks/{task_id}/upload-slots` requires `photo_count` from 1 through 5, reuses unexpired pending slots, and never creates more than 5 uploaded or pending Assets.
 - Attempt `input.json` contains the complete input snapshot and one fixed postcard PNG target.
 - Every attempt has an immutable input snapshot and a refinement note.
 - `StartGenerationCommand` includes `attempt_id` and an attempt-scoped output prefix.
