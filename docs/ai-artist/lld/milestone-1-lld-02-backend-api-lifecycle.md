@@ -222,7 +222,7 @@ Each attempt produces one M1 customer artifact: a fixed-dimension postcard PNG.
 }
 ```
 
-The browser receives artifact metadata but never receives `storage_ref` until a download URL is explicitly requested.
+The browser never receives `storage_ref`, including in task metadata, attempt history, or download-link responses. The download API returns only a short-lived presigned URL.
 
 ## Attempt `input.json` Contract
 
@@ -405,8 +405,7 @@ Rules:
 LLD-02 depends on:
 
 - LLD-01 for intake fields and customer-safe state display needs.
-- LLD-03 for generation command consumption and completion/failure events.
-- LLD-03 for artifact readiness metadata and Attempt status updates.
+- LLD-03 for generation command consumption, artifact readiness metadata, and direct Attempt status updates.
 - LLD-05 for runtime storage prefix, IAM, retention, token logging constraints, and presigned URL posture.
 
 LLD-02 provides:

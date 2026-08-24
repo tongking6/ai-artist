@@ -97,6 +97,7 @@ SQS rules:
 - Messages include task_id, attempt_id, input_snapshot_ref, source_asset_ids, output_prefix, and idempotency_key.
 - Visibility timeout exceeds the expected maximum generation duration.
 - M1 visibility timeout is 10 minutes.
+- Generation Lambda timeout is 9 minutes, and the provider call timeout is 8 minutes.
 - Redelivery is safe and must not create duplicate artifacts.
 - Failed messages go to the DLQ after 3 receives.
 - DLQ messages are retained for 14 days.
@@ -199,6 +200,8 @@ Backend:
 | AI_ARTIST_UPLOAD_URL_TTL_SECONDS | Upload URL TTL |
 | AI_ARTIST_DOWNLOAD_URL_TTL_SECONDS | Download URL TTL |
 | AI_ARTIST_TASK_TOKEN_TTL_SECONDS | Fixed at 2592000 seconds (30 days) |
+| AI_ARTIST_GENERATION_LAMBDA_TIMEOUT_SECONDS | Fixed at 540 seconds (9 minutes) |
+| AI_ARTIST_PROVIDER_TIMEOUT_SECONDS | Fixed at 480 seconds (8 minutes) |
 | AI_ARTIST_GENERATION_MODE | `fake` for M1; real provider is deferred |
 | LOG_LEVEL | Basic log verbosity |
 
@@ -226,6 +229,7 @@ M1 does not implement application-data cleanup, archive, or complex recovery. Ta
 - Storage uses tasks/{task_id}/uploads/ and tasks/{task_id}/attempts/{attempt_id}/.
 - `Attempt` storage contains `input.json` and `postcard.png` only.
 - Upload/download URLs are short-lived.
+- Generation Lambda timeout is shorter than the 10-minute SQS visibility timeout, and provider calls time out before the Lambda.
 - Private S3 has Block Public Access and default encryption.
 - `Task` tokens use URL fragment plus Authorization: Bearer.
 - Redelivered SQS messages do not create duplicate artifacts.

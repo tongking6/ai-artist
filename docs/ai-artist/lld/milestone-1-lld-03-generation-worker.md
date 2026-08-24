@@ -273,6 +273,7 @@ LLD-03 provides:
 - Minimum output verification runs before `Attempt.status = ready`.
 - Generation or verification failures set `Attempt.status = failed`.
 - Duplicate commands do not create duplicate artifacts.
+- If S3 contains a valid `postcard.png` but the Attempt update was interrupted, redelivery reuses the artifact and completes the missing Artifact metadata/Attempt status update.
 - The fake provider runs without external credentials.
 - No ZIP, PDF, multi-artifact, marketplace, POD, NFT, or publishing side effect is introduced.
 
