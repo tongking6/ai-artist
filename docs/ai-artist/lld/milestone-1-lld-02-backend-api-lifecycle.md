@@ -339,7 +339,10 @@ Request body:
 Rules:
 
 - The body may contain only `title`, `note`, and `style`.
-- Each provided field must be a non-empty valid value; omitted fields remain unchanged.
+- `title` must be 1 to 120 characters.
+- `note` must be 1 to 1000 characters.
+- `style` must be exactly `warm_handmade`.
+- Omitted fields remain unchanged.
 - The endpoint is allowed only while the Task is `draft` or `uploading` and before any Attempt exists.
 - It returns a conflict once the Task is `ready` or any Attempt exists.
 - After the update, the backend recalculates Task status from metadata completeness and uploaded Asset count.
@@ -371,9 +374,15 @@ Upload-slot rules:
 - The endpoint is allowed while the Task is `draft` or `uploading`, before any Attempt exists.
 - Repeated requests may be made while intake is incomplete.
 - Unexpired pending slots are reused; new slots are created only for the missing count.
-- The backend rejects a request below the number of already uploaded Assets.
+- `photo_count` must not be lower than the current uploaded plus pending Asset count. M1 does not cancel surplus pending slots; the user must wait for them to expire before requesting a smaller count.
 - The backend rejects any request that would exceed 5 uploaded or pending Assets.
 - Once the requested Assets are uploaded and title, note, and style are complete, the Task becomes `ready`.
+
+Asset-complete behavior:
+
+- If the Asset is already `uploaded`, the endpoint returns the existing Asset metadata without revalidating or creating a duplicate record.
+- If the object is missing or validation fails, the endpoint returns an explicit error and does not mark the Asset `uploaded`.
+- An uploaded Asset is permanently bound to its Task and cannot be completed or attached through another Task.
 
 ### Generate And Refine
 
@@ -466,9 +475,11 @@ LLD-02 provides:
 
 - Task tokens are hash-only server side and never accepted in query/path/cookie/body.
 - `PATCH /v1/tasks/{task_id}` persists only title, note, and style before the Task is ready or any Attempt exists.
+- Task metadata validation is `title` 1–120 characters, `note` 1–1000 characters, and `style = warm_handmade`.
 - Task status becomes `ready` only when metadata is complete and 1 to 5 Assets are uploaded.
 - Upload slots use server-owned private keys and short TTLs.
 - `POST /v1/tasks/{task_id}/upload-slots` requires `photo_count` from 1 through 5, reuses unexpired pending slots, and never creates more than 5 uploaded or pending Assets.
+- A repeated asset-complete call for an uploaded Asset is idempotent and cannot bind the Asset to another Task.
 - Attempt `input.json` contains the complete input snapshot and one fixed postcard PNG target.
 - Every attempt has an immutable input snapshot and a refinement note.
 - `StartGenerationCommand` includes `attempt_id` and an attempt-scoped output prefix.
