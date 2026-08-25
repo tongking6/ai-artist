@@ -8,13 +8,13 @@
 | Owner | Codex |
 | Product milestone | M1: `Memory Product Pack Agent` |
 | Primary source | Product direction only; the reconciled LLDs are authoritative for implementation contracts |
-| Current design direction | Website-integrated postcard artifact generation |
+| Current design direction | LAN-only home Kubernetes postcard generation with external AI APIs |
 
 ## 1. Executive Summary
 
 M1 is a narrow website-first workflow. A user creates a `Task`, uploads 1 to 5 photos, and provides a title, note, and style. The system creates one or more immutable generation `Attempt`s, each with a complete input snapshot and an optional refinement note. Each successful Attempt produces exactly one `1800x1200` postcard PNG.
 
-M1 proves the intake -> upload -> asynchronous generation -> status -> download loop. It intentionally does not implement a product pack, rights workflow, automated QA gate, packaging, accounts, payments, marketplace publishing, POD, NFT, or email delivery.
+M1 proves the intake -> upload -> asynchronous generation -> status -> download loop on a home Linux server running a single-node Kubernetes cluster. It is accessible only from the trusted home LAN. AI inference runs through outbound OpenAI and/or Anthropic API calls; the home server does not host a model. M1 intentionally does not implement a product pack, rights workflow, automated QA gate, packaging, accounts, payments, marketplace publishing, POD, NFT, email delivery, public Internet access, or high availability.
 
 Implementation details and field-level contracts are owned by [LLD-01](../lld/milestone-1-lld-01-website-intake-status-delivery.md), [LLD-02](../lld/milestone-1-lld-02-backend-api-lifecycle.md), [LLD-03](../lld/milestone-1-lld-03-generation-worker.md), and [LLD-05](../lld/milestone-1-lld-05-runtime-security-ops.md). [LLD-04](../lld/milestone-1-lld-04-qa-packaging-delivery.md) is deferred.
 
@@ -29,11 +29,14 @@ Implementation details and field-level contracts are owned by [LLD-01](../lld/mi
 | Generation execution | `Attempt` with a complete immutable snapshot |
 | Refinement | Only `refinement_note` is mutable between Attempts |
 | Output | One `1800x1200` `image/png` postcard per successful Attempt |
-| Provider | Deterministic fake provider for M1 |
-| Async delivery | SQS generation queue, Generation Lambda, and DLQ |
+| Provider | External OpenAI and/or Anthropic API adapter; deterministic fake provider for tests |
+| Runtime | Single-node Kubernetes on a home Linux server |
+| Network exposure | Trusted home LAN only; no public ingress or router port forwarding |
+| Async delivery | PostgreSQL-backed job queue and Generation Worker Deployment |
 | Customer access | Task-link bearer token, valid for 30 days |
 | Data cleanup | No application-data cleanup, archive, or complex recovery in M1 |
-| DLQ retention | 14 days |
+| Failed-job retention | 14 days |
+| Availability | Single-node, best-effort; no HA requirement |
 
 ## 3. Goals And Non-Goals
 
@@ -41,7 +44,7 @@ Implementation details and field-level contracts are owned by [LLD-01](../lld/mi
 
 - Let a user create a draft Task before uploading photos.
 - Accept 1 to 5 photos with title, note, and style.
-- Upload photos directly to private S3 using short-lived backend-issued upload instructions.
+- Upload photos directly to a private S3-compatible object store using short-lived backend-issued upload instructions.
 - Create an Attempt only when the Task input is ready.
 - Support refinement Attempts that change only `refinement_note`.
 - Generate one postcard PNG asynchronously.
@@ -56,6 +59,8 @@ Implementation details and field-level contracts are owned by [LLD-01](../lld/mi
 - Email delivery, marketplace publishing, Etsy, Shopify, POD, NFT, or fulfillment.
 - Public galleries or a general-purpose image-generation playground.
 - Application-data cleanup, archive tiers, or complex recovery workflows.
+- Public DNS, public ingress, Internet-facing access, multi-node Kubernetes, or high availability.
+- Running OpenAI, Claude, or another foundation model on the home server.
 
 ## 4. User Experience
 
@@ -76,8 +81,8 @@ Task status:
 
 Attempt status:
 
-- `queued`: generation command is waiting in SQS.
-- `generating`: Generation Lambda owns the Attempt.
+- `queued`: generation command is waiting in the PostgreSQL-backed job queue.
+- `generating`: the Generation Worker owns the Attempt.
 - `ready`: postcard artifact is available.
 - `failed`: generation failed and a retry/refinement is available.
 
@@ -85,41 +90,41 @@ Attempt status:
 
 ```mermaid
 flowchart LR
-  U[Customer Browser] --> CF[CloudFront + Website S3]
-  U --> API[API Gateway]
-  API --> BL[Backend API Lambda]
-  BL --> DB[DynamoDB Task Table]
-  BL --> S3[Private Artifact S3]
-  U -->|presigned upload| S3
-  BL --> Q[SQS Generation Queue]
-  Q --> GW[Generation Lambda]
-  GW --> S3
+  U[LAN Customer Browser] --> I[LAN-only Kubernetes Ingress]
+  I --> W[Website Deployment]
+  I --> API[Backend API Deployment]
+  I --> O[Private S3-compatible Object Store]
+  API --> DB[PostgreSQL]
+  API --> O
+  U -->|short-lived upload| O
+  API --> Q[PostgreSQL Job Table]
+  Q --> GW[Generation Worker Deployment]
+  GW --> P[OpenAI or Anthropic API]
+  GW --> O
   GW --> DB
-  Q --> DLQ[SQS DLQ]
-  U -->|presigned download| S3
+  U -->|short-lived download| O
 ```
 
 Runtime responsibilities:
 
 | Component | Responsibility |
 | --- | --- |
-| CloudFront + S3 | Host the website and approved public style assets. |
-| API Gateway + Backend Lambda | Create Tasks, issue upload/download links, validate input, create Attempts, return status, and send SQS commands. |
-| DynamoDB | Store Task, Asset, Attempt, and Artifact metadata. |
-| Private S3 | Store source uploads, Attempt snapshots, and postcard artifacts. |
-| SQS + Generation Lambda | Deliver and execute asynchronous generation commands. |
-| SQS DLQ | Retain failed generation commands for 14 days. |
-| CloudWatch | Basic logs and error visibility without complex dashboards. |
+| LAN-only Ingress + Website Deployment | Serve the website only to trusted home-network clients. |
+| Backend API Deployment | Create Tasks, issue upload/download links, validate input, create Attempts, return status, and enqueue generation jobs. |
+| PostgreSQL | Store Task, Asset, Attempt, Artifact, and durable job metadata. |
+| Private S3-compatible object store | Store source uploads, Attempt snapshots, and postcard artifacts on persistent storage. |
+| Generation Worker Deployment | Claim durable jobs and call the configured external AI provider over outbound HTTPS. |
+| Kubernetes/container logs | Provide basic runtime and failure visibility without a complex observability stack. |
 
 ## 6. Primary Runtime Flow
 
 1. The browser creates a draft Task and receives a one-time raw Task token.
-2. The user adds one or more JPEG/PNG photos; the browser requests slots for that batch and uploads directly to private S3.
+2. The user adds one or more JPEG/PNG photos; the browser requests slots for that batch and uploads directly to the private S3-compatible object store.
 3. The browser confirms each upload; the backend validates stored object metadata. The user may repeat this step one photo or one batch at a time.
 4. The user selects `Done adding photos`; the backend validates title, note, style, 1–5 uploaded Assets, and no pending slots, then sets the Task to `ready`.
 5. `Generate` creates Attempt 1 with a complete immutable snapshot and status `queued`.
-6. The backend sends `StartGenerationCommand` to SQS.
-7. Generation Lambda claims the Attempt, generates the postcard, performs minimum output verification, writes Artifact metadata, and directly updates the Attempt to `ready` or `failed`.
+6. The backend atomically persists the Attempt and its `StartGenerationCommand` job in PostgreSQL.
+7. The Generation Worker claims the job, calls the configured OpenAI or Anthropic adapter, performs minimum output verification, writes Artifact metadata, and directly updates the Attempt to `ready` or `failed`.
 8. The browser polls Task metadata or Attempt history.
 9. For a ready Artifact, the backend returns only a short-lived presigned download URL.
 10. A refinement submits only `refinement_note` and creates a later Attempt after no Attempt is `queued` or `generating`.
@@ -149,25 +154,32 @@ Storage references remain internal. Customer APIs expose artifact metadata and, 
 
 ## 8. Security And Runtime Constraints
 
-- Private S3 buckets use Block Public Access, ACLs disabled, and default encryption.
-- The browser never chooses S3 object keys.
+- The Kubernetes Ingress, website, API, and object-store upload/download endpoints are reachable only from the trusted home LAN.
+- The router must not expose the application through port forwarding, UPnP, a public tunnel, or a public load balancer in Phase 1.
+- Private object storage is not anonymously readable and uses persistent storage with host-level access restricted to the runtime administrator.
+- The browser never chooses object keys.
 - Task-scoped APIs require the Task bearer token; the token is valid for 30 days from Task creation.
 - Tokens are sent only in the `Authorization` header and are never logged or accepted in query strings, paths, cookies, or request bodies.
 - Uploads accept only JPEG/PNG, up to 20 MB per photo and 5 photos per Task.
 - Upload and download URLs have a default TTL of 15 minutes.
-- Generation Lambda cannot issue customer download URLs or modify unrelated Tasks.
+- OpenAI and Anthropic API keys are server-side Kubernetes Secrets, are never committed or returned to the browser, and are available only to the Generation Worker.
+- The home server needs outbound HTTPS access to the selected AI provider; no AI model runs locally.
+- The Generation Worker cannot issue customer download URLs or modify unrelated Tasks.
+- Phase 1 uses one Kubernetes node and one replica per stateful or worker component; planned downtime and node failure are accepted.
 - M1 does not implement application-data cleanup, archive, or complex recovery.
 
 ## 9. Deferred Scope
 
 LLD-04 remains deferred. Future milestones may add automated visual QA, multi-artifact output, ZIP/PDF packaging, manifests, rights checks, and marketplace-facing delivery, but those features are not part of the M1 implementation path.
 
+AWS remains a possible later deployment target if public access, managed durability, scaling, or higher availability becomes necessary. That migration must preserve the Task/Attempt/API and provider contracts while replacing runtime adapters; Phase 1 must not depend on AWS SDKs or AWS-specific identifiers in domain interfaces.
+
 ## 10. Implementation Readiness
 
 The reconciled LLD set is the implementation source of truth:
 
 1. LLD-02: Task/Asset/Attempt persistence and customer APIs.
-2. LLD-05: AWS runtime, private storage, SQS, DLQ, and security.
+2. LLD-05: LAN-only home Kubernetes runtime, PostgreSQL, private object storage, job delivery, secrets, and security.
 3. LLD-01: website intake, upload, status, refinement, and download UX.
-4. LLD-03: deterministic fake-provider generation and minimum verification.
+4. LLD-03: external AI-provider generation, deterministic fake-provider tests, and minimum verification.
 5. End-to-end verification for one-photo, five-photo, refinement, failure, redelivery, and artifact download flows.

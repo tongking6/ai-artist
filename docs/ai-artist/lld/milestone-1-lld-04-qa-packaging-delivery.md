@@ -31,7 +31,7 @@ For M1:
 - LLD-03 directly verifies the generated PNG.
 - LLD-03 directly updates Attempt status to ready or failed.
 - LLD-02 issues a short-lived download URL for the ready postcard artifact.
-- No LLD-04 queue, Lambda, event, or status is required.
+- No LLD-04 queue, worker, event, or status is required.
 
 ## Future Entry Contract
 

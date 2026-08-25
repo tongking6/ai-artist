@@ -16,7 +16,7 @@
 | [LLD-01](./milestone-1-lld-01-website-intake-status-delivery.md) | Website Task Intake, Status, Refinement, and Delivery UX | Implementation-ready draft |
 | [LLD-02](./milestone-1-lld-02-backend-api-lifecycle.md) | Backend API, Task Data Model, Attempts, Upload/Download Links | Implementation-ready draft |
 | [LLD-03](./milestone-1-lld-03-generation-worker.md) | Postcard Generation Worker and Minimum Verification | Implementation-ready draft |
-| [LLD-05](./milestone-1-lld-05-runtime-security-ops.md) | AWS Runtime, Storage, Security, SQS, and Retention | Implementation-ready draft |
+| [LLD-05](./milestone-1-lld-05-runtime-security-ops.md) | Home Kubernetes Runtime, Storage, Security, Jobs, and Retention | Implementation-ready draft |
 
 [LLD-04](./milestone-1-lld-04-qa-packaging-delivery.md) is deferred and is not part of the M1 execution path.
 
@@ -76,10 +76,11 @@ tasks/{task_id}/
 
 ### Generation
 
-- LLD-02 creates the Attempt and sends `StartGenerationCommand` to SQS.
+- LLD-02 creates the Attempt and atomically persists a `StartGenerationCommand` job in PostgreSQL.
 - LLD-03 directly updates Attempt status.
 - LLD-03 generates exactly one `1800x1200` PNG.
 - LLD-03 performs minimum verification before setting `ready`.
+- LLD-03 calls the configured OpenAI or Anthropic provider over outbound HTTPS; the fake provider remains available for deterministic tests.
 - LLD-04 is not required.
 
 ### Customer Access
@@ -87,7 +88,7 @@ tasks/{task_id}/
 Task link:
 
 ```text
-https://app.example.com/task/{task_id}#access_token={task_access_token}
+https://ai-artist.home.arpa/task/{task_id}#access_token={task_access_token}
 ```
 
 The browser sends the token as:
@@ -107,9 +108,9 @@ Customer download is a fresh short-lived URL for a ready postcard Artifact only.
 ## Implementation Order
 
 1. LLD-02 Task/Asset/Attempt persistence and customer API.
-2. LLD-05 minimal AWS runtime, private buckets, DynamoDB, SQS, and DLQ retention.
+2. LLD-05 single-node home Kubernetes runtime, PostgreSQL, private S3-compatible storage, and durable job retention.
 3. LLD-01 website intake, upload, status, refinement, and download UX.
-4. LLD-03 deterministic fake-provider generation and minimum verification.
+4. LLD-03 external AI-provider generation, deterministic fake-provider tests, and minimum verification.
 5. End-to-end verification for one-photo, five-photo, refinement, failure, and artifact download flows.
 
 ## Deferred Features
@@ -117,6 +118,7 @@ Customer download is a fresh short-lived URL for a ready postcard Artifact only.
 - LLD-04 QA gate and packaging.
 - PDF and multiple artifact formats.
 - Rights/copyright workflow.
-- SES, WAF, Cognito, accounts, and payments.
+- Public Internet ingress, public DNS, HA, accounts, and payments.
 - Marketplace, POD, NFT, and publishing integrations.
 - Complex observability and visual quality scoring.
+- AWS deployment remains a possible later runtime target, but it is not part of Phase 1.

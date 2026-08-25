@@ -16,23 +16,46 @@ git push -u origin main
 
 Only run these after confirming the local repo should be connected to that GitHub remote.
 
-## Local Environment
+## Phase 1 Runtime
+
+Phase 1 runs on a home Linux server with a single-node Kubernetes cluster.
+
+- Access is limited to trusted devices on the home LAN.
+- Do not configure router port forwarding, UPnP exposure, a public tunnel, public DNS, or an Internet-facing load balancer.
+- Use a private LAN hostname and a locally trusted HTTPS certificate for Task tokens and photo transfer.
+- High availability and automatic failover are not required.
+- AI inference uses outbound OpenAI and/or Anthropic API calls. The home server does not host a foundation model.
+- Keep original photos outside AI Artist and back up PostgreSQL and private object storage before relying on the system for irreplaceable household photos.
+
+AWS may be added later if public access, managed durability, scaling, or HA becomes necessary. Phase 1 application contracts must not depend on AWS SDK types or AWS resource identifiers.
+
+## Local And Kubernetes Environment
 
 Recommended local env file once implementation begins:
 
 ```bash
-# Required for AI generation
+# Select one external AI provider for normal generation
+AI_ARTIST_GENERATION_PROVIDER=openai
+AI_ARTIST_PROVIDER_MODEL=
+
+# Supply only the key required by the selected provider
 OPENAI_API_KEY=
-OPENAI_TEXT_MODEL=
-OPENAI_IMAGE_MODEL=
+ANTHROPIC_API_KEY=
+
+# Home Kubernetes runtime
+AI_ARTIST_STAGE=home
+AI_ARTIST_API_BASE_URL=https://ai-artist.home.arpa/api
+AI_ARTIST_OBJECT_PRESIGN_ENDPOINT=https://objects.ai-artist.home.arpa
+AI_ARTIST_PRIVATE_BUCKET=ai-artist-private
+AI_ARTIST_DATABASE_URL=
 
 # Local output paths
 AI_ARTIST_OUTPUT_DIR=./outputs
 AI_ARTIST_ASSET_CACHE_DIR=./.cache/assets
 
 # Product defaults
-AI_ARTIST_DEFAULT_STYLE=travel-memory-card
-AI_ARTIST_DEFAULT_CHANNEL=etsy-digital-download
+AI_ARTIST_DEFAULT_STYLE=warm_handmade
+AI_ARTIST_DEFAULT_CHANNEL=home-download
 AI_ARTIST_DEFAULT_CURRENCY=USD
 
 # Optional marketplace integrations, draft-only until approved
@@ -49,7 +72,7 @@ NFT_NETWORK=
 OPENSEA_API_KEY=
 ```
 
-Do not commit real `.env` files. Keep secrets in local env vars or a secret manager when a backend exists.
+Do not commit real `.env` files, API keys, database credentials, or Kubernetes Secret manifests containing values. Create provider keys directly in the cluster or through an equivalent local secret workflow. Only the Generation Worker receives `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY`; the browser never receives them.
 
 ## M1 Product Settings
 
@@ -57,22 +80,19 @@ Recommended defaults:
 
 - `product_niche`: `travel_memory_cards`
 - `source_count`: `1-5 photos`
-- `style`: `travel-memory-card`
-- `channels`: `etsy_digital_download`, `social_preview`
-- `publish_mode`: `draft_only`
+- `style`: `warm_handmade`
+- `channel`: `home_download`
+- `publish_mode`: `local_only`
 - `auto_publish`: `false`
 - `nft_enabled`: `false`
 
-M1 output pack:
+M1 output:
 
-- `sticker_sheet`
-- `postcard`
-- `poster`
-- `mockups`
-- `listing_kit`
-- `quality_report`
+- one `1800x1200` `postcard.png` for each successful Attempt
 
 ## Output File Settings
+
+Only the fixed `1800x1200` postcard PNG applies to M1. The additional export formats below are future product-pack settings and are not part of the Phase 1 implementation path.
 
 Recommended early export formats:
 

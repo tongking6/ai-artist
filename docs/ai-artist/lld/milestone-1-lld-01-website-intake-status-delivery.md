@@ -18,7 +18,7 @@ The website is not a marketplace, account portal, operator dashboard, or generic
 
 ## In Scope
 
-- Public product-start page.
+- LAN-accessible product-start page.
 - Draft task creation before upload.
 - Guided intake for 1 to 5 photos.
 - Upload UI using backend-issued upload slots.
@@ -37,7 +37,7 @@ The website is not a marketplace, account portal, operator dashboard, or generic
 - Marketplace publishing, listing drafts, POD, NFT, fulfillment, or buyer messaging.
 - Operator review UI.
 - Exposing internal artifacts or storage references.
-- Direct customer control over S3 object keys, attempt IDs, or runtime prefixes.
+- Direct customer control over object-store keys, attempt IDs, or runtime prefixes.
 
 ## Primary User Flow
 
@@ -137,7 +137,7 @@ The UI may display attempt history from `GET /v1/tasks/{task_id}/attempts`. The 
 
 The UI must not expose:
 
-- S3 keys or bucket names.
+- Object-store keys or bucket names.
 - Presigned URL internals.
 - Prompt logs, provider errors, or stack traces.
 - Internal generation or operational metadata.
@@ -159,7 +159,7 @@ Default delivery is task-link-only.
 The task link format is:
 
 ```text
-https://app.example.com/task/{task_id}#access_token={task_access_token}
+https://ai-artist.home.arpa/task/{task_id}#access_token={task_access_token}
 ```
 
 The frontend extracts the URL fragment and sends the token only in:
@@ -194,7 +194,7 @@ LLD-01 depends on:
 
 - LLD-02 for task creation, upload slots, input validation, task status, attempt creation, status metadata, token validation, attempt history, and artifact download links.
 - LLD-03 for artifact generation and readiness metadata.
-- LLD-05 for task-link constraints, public runtime config, no-store/cache/referrer policy requirements, and private storage.
+- LLD-05 for LAN access, task-link constraints, browser-safe runtime config, no-store/cache/referrer policy requirements, and private storage.
 
 LLD-01 provides:
 
@@ -213,8 +213,9 @@ LLD-01 provides:
 - Status screens distinguish task status from attempt status.
 - Attempt history is viewable and previous ready artifacts remain downloadable.
 - Delivery uses a fresh short-lived artifact download URL.
+- The website and its upload/download endpoints require the trusted home LAN and do not depend on public Internet ingress.
 - The UI does not introduce accounts, payment, marketplace publishing, POD, NFT, public gallery, rights workflow, or operator review.
 
 ## Open Questions
 
-None. Public domain and route structure are deployment parameters.
+None. The private LAN hostname, certificate, and route structure are deployment parameters. Public Internet routing is deferred.

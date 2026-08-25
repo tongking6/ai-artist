@@ -23,8 +23,8 @@ The worker is not customer-facing. It consumes an internal `StartGenerationComma
 - Reading the Attempt `input.json` snapshot.
 - Reading 1 to 5 private source photos.
 - Provider-neutral postcard generation.
-- Deterministic fake provider for development and demo.
-- Real provider adapter boundary for later or approved runtime use.
+- External OpenAI and Anthropic provider adapters selected by runtime configuration.
+- Deterministic fake provider for development, tests, and smoke verification.
 - Fixed `1800x1200` PNG output.
 - Minimum output verification.
 - Artifact metadata persistence.
@@ -96,16 +96,16 @@ Rules:
 sequenceDiagram
   participant API as LLD-02 Backend API
   participant W as LLD-03 Generation Worker
-  participant S3 as Private S3
-  participant P as Generation Provider
+  participant OS as Private Object Store
+  participant P as External AI Provider
   participant DB as Task/Attempt Record
 
   API->>W: StartGenerationCommand
   W->>DB: queued -> generating
-  W->>S3: Read input.json and source photos
-  W->>P: Generate postcard PNG
+  W->>OS: Read input.json and source photos
+  W->>P: Generate postcard through outbound HTTPS
   P-->>W: PNG bytes
-  W->>S3: Write postcard.png
+  W->>OS: Write postcard.png
   W->>W: Minimum output verification
   W->>DB: Write Artifact metadata and generating -> ready
   W->>DB: On failure, generating -> failed
@@ -141,7 +141,7 @@ generating -> failed
 
 LLD-03 must not claim an Attempt that is already `ready`, `failed`, or owned by another active execution.
 
-## Provider Boundary
+## External Provider Boundary
 
 Provider-specific calls live behind a small adapter:
 
@@ -153,7 +153,9 @@ interface GenerationProvider {
 }
 ```
 
-`GeneratePostcardInput` includes the input snapshot and decoded/source asset references. The provider returns PNG bytes and provider metadata needed for internal logs.
+`GeneratePostcardInput` includes the input snapshot and decoded/source asset references. The provider returns PNG bytes and provider metadata needed for internal logs. The configured provider is `openai` or `anthropic` for normal Phase 1 household use; `fake` is reserved for deterministic tests and smoke verification.
+
+The worker calls the selected provider over outbound HTTPS using a Kubernetes Secret. It does not run foundation-model weights on the home server. An adapter is eligible for end-to-end generation only when its selected model can satisfy the fixed postcard PNG contract. Provider credentials, raw responses, and full prompts must not be written to artifacts or logs.
 
 ### Deterministic Fake Provider
 
@@ -166,7 +168,7 @@ It is used for:
 - Safe demo fixtures.
 - End-to-end workflow verification without provider cost or network dependency.
 
-The real provider, when enabled, uses the same `GenerationProvider` interface.
+OpenAI and Anthropic adapters use the same `GenerationProvider` interface. Switching providers changes runtime configuration and adapter behavior, not the Task, Attempt, or Artifact contracts.
 
 ## Output Contract
 
@@ -253,7 +255,7 @@ Internal logs may retain a narrow failure category and platform/provider correla
 LLD-03 depends on:
 
 - LLD-02 for `StartGenerationCommand`, Task/Attempt records, immutable input snapshots, source asset metadata, and Attempt creation.
-- LLD-05 for private storage, runtime mode, secrets handling, retention, and observability.
+- LLD-05 for private object storage, durable jobs, runtime mode, provider secrets, retention, and observability.
 
 LLD-03 provides:
 
@@ -273,10 +275,12 @@ LLD-03 provides:
 - Minimum output verification runs before `Attempt.status = ready`.
 - Generation or verification failures set `Attempt.status = failed`.
 - Duplicate commands do not create duplicate artifacts.
-- If S3 contains a valid `postcard.png` but the Attempt update was interrupted, redelivery reuses the artifact and completes the missing Artifact metadata/Attempt status update.
+- If private object storage contains a valid `postcard.png` but the Attempt update was interrupted, redelivery reuses the artifact and completes the missing Artifact metadata/Attempt status update.
 - The fake provider runs without external credentials.
+- The configured OpenAI or Anthropic adapter runs through outbound HTTPS and receives its API key only from a server-side Secret.
+- No foundation model runs on the home server.
 - No ZIP, PDF, multi-artifact, marketplace, POD, NFT, or publishing side effect is introduced.
 
-## Deferred Provider Note
+## Provider Deployment Parameters
 
-None for the M1 fake-provider path. A real provider remains a later adapter/configuration decision.
+The selected provider, model identifier, and API key are deployment parameters. They must not change the M1 output, status, idempotency, privacy, or minimum-verification contracts.

@@ -103,9 +103,9 @@ The bet is that users do not only want isolated AI images. They want a packaged 
 
 A non-technical user can complete the guided UI, submit photos and rights confirmation, choose a package, and receive a polished `final_download_pack.zip`. Internally, the operator can generate the pack through a local CLI and QA checklist.
 
-### Why include a user UI in M1 if the generation workflow is local?
+### Why include a user UI in M1 if the runtime is private and local?
 
-Because the target customer is not an engineer. The UI is part of the product experience and purchase flow. The CLI remains valuable internally because it keeps generation repeatable, fast to debug, and cheap to operate before a full SaaS platform exists.
+Because the target user is not an engineer. The UI is the Phase 1 product experience even though the Kubernetes runtime is reachable only on the home LAN. Deterministic fixtures and the fake provider keep generation repeatable and cheap to debug before any public SaaS deployment exists.
 
 ### What is in scope?
 
@@ -114,14 +114,14 @@ Because the target customer is not an engineer. The UI is part of the product ex
 - Photo upload and travel-memory notes.
 - Usage intent and rights confirmation.
 - Pack tier selection.
-- Internal local CLI and `project.json` contract.
-- Customer-facing download pack.
-- Internal manifest, quality report, rights checklist, prompt log, and generation notes.
+- Durable Task/Attempt workflow and immutable `input.json` contract.
+- Customer-facing postcard PNG download.
+- External OpenAI and/or Anthropic generation through server-side API credentials.
 - Fake-provider or fixture-based smoke test for repeatable verification.
 
 ### What is out of scope?
 
-- Full SaaS app, user accounts, database, cloud asset library, background jobs, or public gallery.
+- Public multi-tenant SaaS, user accounts, shared cloud asset library, public Internet access, or public gallery.
 - Native Etsy, Shopify, POD, payment processing, fulfillment, buyer messaging, or marketplace account integration.
 - Auto-publishing listings, creating POD products, or minting NFTs.
 - Pet, portrait, fan art, celebrity, fictional character, logo-heavy, or unclear-rights workflows.
@@ -157,4 +157,3 @@ Current Etsy rules for digital listings, AI disclosure, file limits, buyer-visib
 3. Internal CLI contract for generating a pack.
 4. Sample output pack using fake or owned demo photos.
 5. QA checklist and delivery packaging flow.
-

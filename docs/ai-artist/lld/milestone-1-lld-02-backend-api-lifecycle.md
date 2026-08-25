@@ -35,7 +35,7 @@ LLD-02 is the source of truth for task lifecycle and attempt metadata.
 - Generation provider implementation.
 - QA gate implementation.
 - ZIP packaging.
-- AWS deployment topology beyond API/runtime needs.
+- Runtime deployment topology beyond API needs.
 - Customer accounts, payment, marketplace publishing, POD, NFT, or operator review.
 
 ## Data Model And Status Ownership
@@ -119,7 +119,7 @@ The task link is a bearer credential.
 Link format:
 
 ```text
-https://app.example.com/task/{task_id}#access_token={task_access_token}
+https://ai-artist.home.arpa/task/{task_id}#access_token={task_access_token}
 ```
 
 API transport:
@@ -153,7 +153,7 @@ Each upload slot item has this shape:
   "fields": {
     "key": "server-owned-key",
     "policy": "...",
-    "x-amz-signature": "..."
+    "provider_field_name": "provider-issued-value"
   },
   "constraints": {
     "accepted_media_types": ["image/jpeg", "image/png"],
@@ -184,7 +184,7 @@ The upload-slots endpoint always returns an array envelope:
 
 Rules:
 
-- The browser never chooses S3 object keys.
+- The browser never chooses object-store keys.
 - Upload URLs are short-lived.
 - Uploaded asset metadata is recorded before submission.
 - Uploads must be private.
@@ -217,7 +217,7 @@ Pending Asset schema:
 }
 ```
 
-The server persists the batch idempotency key as `upload_batch_key` on each reservation. After successful S3 validation, the same record is updated with `upload_status = uploaded`, the verified `size_bytes`, and `uploaded_at`. Asset upload status transitions are:
+The server persists the batch idempotency key as `upload_batch_key` on each reservation. After successful object-store validation, the same record is updated with `upload_status = uploaded`, the verified `size_bytes`, and `uploaded_at`. Asset upload status transitions are:
 
 ```text
 pending -> uploaded
@@ -326,13 +326,13 @@ Attempt creation must:
 - Write the complete immutable input snapshot.
 - Persist it at `tasks/{task_id}/attempts/{attempt_id}/input.json` and record its checksum.
 - Set the new attempt as `current_attempt_id`.
-- Trigger LLD-03 with `StartGenerationCommand`.
+- Persist a durable LLD-03 `StartGenerationCommand` job in the same PostgreSQL transaction as the Attempt.
 
 LLD-02 must reject creation of a new attempt while another attempt for the task is `queued` or `generating`.
 
 ## `StartGenerationCommand`
 
-LLD-02 emits this command to LLD-03.
+LLD-02 persists this command for LLD-03 to consume through the LLD-05 durable job adapter.
 
 ```json
 {
@@ -437,7 +437,7 @@ Request body:
 }
 ```
 
-`photo_count` is the number of newly selected photos for this upload request and must be an integer from 1 through 5. The backend creates that many server-owned short-lived upload slots. The browser uploads directly to private S3 and then confirms each uploaded asset through:
+`photo_count` is the number of newly selected photos for this upload request and must be an integer from 1 through 5. The backend creates that many server-owned short-lived upload slots. The browser uploads directly to the private S3-compatible object store and then confirms each uploaded asset through:
 
 ```http
 POST /v1/tasks/{task_id}/assets/{asset_id}/complete
@@ -512,7 +512,7 @@ Allowed customer fields:
 
 Disallowed customer fields:
 
-- Raw S3 keys.
+- Raw object-store keys.
 - Internal artifact refs.
 - Stack traces.
 - Provider errors.
@@ -543,7 +543,7 @@ LLD-02 depends on:
 
 - LLD-01 for intake fields and customer-safe state display needs.
 - LLD-03 for generation command consumption, artifact readiness metadata, and direct Attempt status updates.
-- LLD-05 for runtime storage prefix, IAM, retention, token logging constraints, and presigned URL posture.
+- LLD-05 for runtime storage prefix, workload access, durable job delivery, retention, token logging constraints, and presigned URL posture.
 
 LLD-02 provides:
 
@@ -567,6 +567,7 @@ LLD-02 provides:
 - Attempt `input.json` contains the complete input snapshot and one fixed postcard PNG target.
 - Every attempt has an immutable input snapshot and a refinement note.
 - `StartGenerationCommand` includes `attempt_id` and an attempt-scoped output prefix.
+- Attempt creation and durable job enqueueing commit atomically.
 - Only one attempt per task can be `queued` or `generating`.
 - Download links target only ready postcard artifacts owned by the task.
 - No accounts, payment, marketplace, POD, NFT, public gallery, rights workflow, or operator gate is introduced.
