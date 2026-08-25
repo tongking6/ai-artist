@@ -148,6 +148,7 @@ Each upload slot item has this shape:
 {
   "slot_id": "slot_01J...",
   "asset_id": "asset_01",
+  "client_file_id": "file_01J...",
   "upload_method": "presigned_post",
   "expires_at": "2026-08-22T00:15:00Z",
   "fields": {
@@ -157,7 +158,7 @@ Each upload slot item has this shape:
   },
   "constraints": {
     "accepted_media_types": ["image/jpeg", "image/png"],
-  "max_bytes": 20971520
+    "max_bytes": 20971520
   }
 }
 ```
@@ -170,6 +171,7 @@ The upload-slots endpoint always returns an array envelope:
     {
       "slot_id": "slot_01J...",
       "asset_id": "asset_01J...",
+      "client_file_id": "file_01J...",
       "upload_method": "presigned_post",
       "expires_at": "2026-08-25T12:15:00Z",
       "fields": {},
@@ -203,8 +205,10 @@ Pending Asset schema:
 {
   "asset_id": "asset_01J...",
   "task_id": "task_01J...",
+  "client_file_id": "file_01J...",
   "filename": "kyoto.jpg",
   "media_type": "image/jpeg",
+  "declared_size_bytes": 1248290,
   "size_bytes": null,
   "upload_status": "pending",
   "upload_batch_key": "upload_batch_01J...",
@@ -217,7 +221,7 @@ Pending Asset schema:
 }
 ```
 
-The server persists the batch idempotency key as `upload_batch_key` on each reservation. After successful object-store validation, the same record is updated with `upload_status = uploaded`, the verified `size_bytes`, and `uploaded_at`. Asset upload status transitions are:
+The server persists the batch idempotency key as `upload_batch_key` on each reservation. `client_file_id` is browser-generated, stable for the selected file within this batch, and unique within the request. `filename` is display metadata only; the backend strips path components and chooses the storage extension from the validated media type. After successful object-store validation, the same record is updated with `upload_status = uploaded`, the verified `size_bytes`, and `uploaded_at`. Asset upload status transitions are:
 
 ```text
 pending -> uploaded
@@ -432,12 +436,36 @@ Request body:
 
 ```json
 {
-  "photo_count": 3,
+  "files": [
+    {
+      "client_file_id": "file_01J...",
+      "filename": "kyoto.jpg",
+      "media_type": "image/jpeg",
+      "size_bytes": 1248290
+    },
+    {
+      "client_file_id": "file_01K...",
+      "filename": "osaka.png",
+      "media_type": "image/png",
+      "size_bytes": 2084000
+    }
+  ],
   "idempotency_key": "upload_batch_01J..."
 }
 ```
 
-`photo_count` is the number of newly selected photos for this upload request and must be an integer from 1 through 5. The backend creates that many server-owned short-lived upload slots. The browser uploads directly to the private S3-compatible object store and then confirms each uploaded asset through:
+`files` is the complete manifest for the newly selected batch and must contain 1 to 5 items. Every item must include a unique `client_file_id`, a display `filename`, an allowed `media_type`, and the browser-observed `size_bytes`. The backend validates the manifest before creating one server-owned short-lived upload slot per item. The response preserves request order and returns `client_file_id` with its assigned `asset_id` so the browser can map each file without relying on filename uniqueness.
+
+Manifest rules:
+
+- `client_file_id` is an opaque browser-generated string of 1 to 128 characters and must be unique within the batch.
+- `filename` must be 1 to 255 characters after path components and control characters are removed; it is display metadata and is never used to form an object key.
+- `media_type` must be `image/jpeg` or `image/png`.
+- `size_bytes` must be an integer from 1 through 20 MB inclusive.
+- The backend derives `normalized_ext` as `jpg` or `png` from `media_type`.
+- On asset completion, the backend verifies the stored media type and actual size; a mismatch with the declared manifest fails validation.
+
+The browser uploads directly to the private S3-compatible object store and then confirms each uploaded asset through:
 
 ```http
 POST /v1/tasks/{task_id}/assets/{asset_id}/complete
@@ -450,11 +478,11 @@ Upload-slot rules:
 - The endpoint is allowed while the Task is `draft` or `uploading`, before any Attempt exists.
 - Repeated requests may be made while intake is incomplete.
 - `idempotency_key` is required, opaque, unique per Task and per Add-photo batch, and reused when the same request is retried.
-- A retry with the same Task and `idempotency_key` returns the original `slots` array and creates no new Asset reservations.
-- Reusing the same key with a different `photo_count` returns `upload_batch_mismatch`.
+- A retry with the same Task, `idempotency_key`, and exact ordered file manifest returns the original `slots` array and creates no new Asset reservations.
+- Reusing the same key with a different manifest, including file order or any per-file field, returns `upload_batch_mismatch`.
 - A batch key whose reservations have all expired returns `upload_batch_expired`; the client must use a new key for a new batch.
 - Each request reserves slots only for newly selected files; a retry for the same file may reuse its existing pending slot.
-- The backend rejects any request where `uploaded_assets + pending_slots + photo_count > 5`.
+- The backend rejects any request where `uploaded_assets + pending_slots + files.length > 5`.
 - M1 does not require a final photo count and does not cancel pending slots. Expired pending slots release their capacity for a later request.
 - Creating upload slots or confirming an upload moves a `draft` Task to `uploading`.
 - The Task remains `uploading` while the user may add more photos. It becomes `ready` only through `POST /complete-intake` after all selected uploads are complete.
@@ -560,8 +588,9 @@ LLD-02 provides:
 - Task metadata validation is `title` 1–120 characters, `note` 1–1000 characters, and `style = warm_handmade`.
 - `POST /v1/tasks/{task_id}/complete-intake` requires complete metadata, 1 to 5 uploaded Assets, and zero pending slots before setting Task status to `ready`.
 - Upload slots use server-owned private keys and short TTLs.
-- `POST /v1/tasks/{task_id}/upload-slots` requires the count of newly selected photos, enforces `uploaded + pending + requested <= 5`, and never creates more than 5 uploaded or pending Assets.
+- `POST /v1/tasks/{task_id}/upload-slots` requires a validated per-file manifest, enforces `uploaded + pending + files.length <= 5`, and never creates more than 5 uploaded or pending Assets.
 - Upload-slots retries with the same Task and `idempotency_key` return the same `slots` array without creating new reservations.
+- Every upload slot echoes `client_file_id` and maps it to one server-assigned `asset_id`.
 - A repeated asset-complete call for an uploaded Asset is idempotent and cannot bind the Asset to another Task.
 - Pending upload reservations are persisted as Asset records with `pending`, `uploaded`, or `expired` status; capacity counts only unexpired pending reservations.
 - Attempt `input.json` contains the complete input snapshot and one fixed postcard PNG target.
@@ -580,8 +609,8 @@ LLD-02 provides:
 | --- | ---: | --- | --- |
 | Task metadata violates length/style rules | 400 | `invalid_task_metadata` | false |
 | Task is ready or has an Attempt and receives a base-input mutation | 409 | `task_immutable` | false |
-| `photo_count` is invalid or exceeds the 5-photo capacity | 400 | `invalid_photo_count` | false |
-| Same idempotency key is reused with a different `photo_count` | 409 | `upload_batch_mismatch` | false |
+| The file manifest is malformed, contains unsupported media, declares an invalid size, or exceeds the 5-photo capacity | 400 | `invalid_upload_manifest` | false |
+| Same idempotency key is reused with a different ordered file manifest | 409 | `upload_batch_mismatch` | false |
 | Same idempotency key refers to fully expired reservations | 409 | `upload_batch_expired` | false |
 | Asset ID does not exist for this Task | 404 | `asset_not_found` | false |
 | Asset belongs to another Task | 409 | `asset_not_owned_by_task` | false |

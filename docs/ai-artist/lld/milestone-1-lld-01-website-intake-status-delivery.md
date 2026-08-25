@@ -92,7 +92,8 @@ UX requirements:
 - Show per-photo upload progress.
 - Accept only JPEG and PNG photos, up to 20 MB per photo and 5 photos per Task.
 - Let the user add one photo or a batch of photos through the file picker; do not ask for the final photo count first.
-- Request upload slots for the newly selected files with a new batch-level `idempotency_key`; reuse that key if the request is retried.
+- Request upload slots with a per-file manifest containing `client_file_id`, `filename`, `media_type`, and `size_bytes`, plus a new batch-level `idempotency_key`; reuse the exact manifest and key if the HTTP request is retried.
+- Map each response slot back to the selected browser file through `client_file_id`, not filename or array position alone.
 - Disable `Add photo` when 5 photos are uploaded or pending.
 - Keep the Task in `uploading` while the user is adding photos.
 - Provide a `Done adding photos` action that calls the complete-intake API.
@@ -131,7 +132,7 @@ Attempt status:
 | `queued` | Generation is waiting to start. |
 | `generating` | Postcard artifact is being generated. |
 | `ready` | Artifact is available. |
-| `failed` | Generation failed; refinement or retry is available. |
+| `failed` | Generation failed and this Attempt is terminal; a new refinement Attempt may be created. |
 
 The UI may display attempt history from `GET /v1/tasks/{task_id}/attempts`. The current attempt is shown by default; previous ready artifacts remain downloadable.
 
@@ -180,7 +181,7 @@ Rules:
 
 `failed`:
 
-- Present the issue as a technical failure or retry path.
+- Present the issue as a terminal technical failure for this Attempt and offer a new refinement Attempt.
 - Avoid stack traces and provider internals.
 
 `ready`:
@@ -206,6 +207,7 @@ LLD-01 provides:
 
 - A user can create a draft, upload 1 to 5 photos, enter title/note/style, and reach task status `ready`.
 - The user can add photos one at a time or in batches before completing intake.
+- Each selected file is represented by the LLD-02 manifest and matched to its upload slot through `client_file_id`.
 - The first Generate action creates Attempt 1.
 - A refinement submits only `refinement_note` and creates a later attempt only when no attempt is queued or generating.
 - The UI does not expose internal artifacts or private storage details.

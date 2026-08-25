@@ -22,9 +22,10 @@ The worker is not customer-facing. It consumes an internal `StartGenerationComma
 - Attempt execution and status updates.
 - Reading the Attempt `input.json` snapshot.
 - Reading 1 to 5 private source photos.
-- Provider-neutral postcard generation.
-- External OpenAI and Anthropic provider adapters selected by runtime configuration.
+- A provider boundary with one M1 production adapter: OpenAI Image API.
+- Fixed `gpt-image-2-2026-04-21` model and image-edit request contract.
 - Deterministic fake provider for development, tests, and smoke verification.
+- Deterministic provider-output normalization to the postcard dimensions.
 - Fixed `1800x1200` PNG output.
 - Minimum output verification.
 - Artifact metadata persistence.
@@ -86,9 +87,10 @@ Rules:
 - LLD-03 does not create `task_id` or `attempt_id`.
 - LLD-03 does not modify the input snapshot.
 - `source_asset_ids` must match the snapshot photo references.
-- A duplicate command with the same `idempotency_key` must not create a second artifact.
+- The job table prevents a duplicate command with the same `idempotency_key`; if one is observed, the worker must not make another provider call or create another artifact.
 - Platform invocation IDs may be used in logs only; they are not domain fields or cross-service contract fields.
-- On redelivery, the worker first checks the Attempt and expected output prefix; an existing valid artifact is reused and the Attempt is finalized without generating a second artifact.
+- A claimed job is single-delivery in M1. Failure or lease expiry is terminal for that Attempt and never re-enqueues the command.
+- The worker makes at most one provider invocation for an Attempt.
 
 ## Worker Flow
 
@@ -97,7 +99,7 @@ sequenceDiagram
   participant API as LLD-02 Backend API
   participant W as LLD-03 Generation Worker
   participant OS as Private Object Store
-  participant P as External AI Provider
+  participant P as OpenAI Image API
   participant DB as Task/Attempt Record
 
   API->>W: StartGenerationCommand
@@ -141,21 +143,47 @@ generating -> failed
 
 LLD-03 must not claim an Attempt that is already `ready`, `failed`, or owned by another active execution.
 
+There is no automatic generation retry. A failed Attempt remains immutable and terminal. A customer may later create a distinct Attempt with a new `attempt_id` and optional `refinement_note`; that is a new generation request, not a retry of the failed job.
+
 ## External Provider Boundary
 
 Provider-specific calls live behind a small adapter:
 
-```ts
-interface GenerationProvider {
-  readonly providerId: string;
-  readonly providerVersion: string;
-  generatePostcard(input: GeneratePostcardInput): Promise<GeneratedPng>;
-}
+```python
+class GenerationProvider(Protocol):
+    provider_id: str
+    provider_version: str
+
+    def generate_postcard(self, input: GeneratePostcardInput) -> GeneratedImage:
+        ...
 ```
 
-`GeneratePostcardInput` includes the input snapshot and decoded/source asset references. The provider returns PNG bytes and provider metadata needed for internal logs. The configured provider is `openai` or `anthropic` for normal Phase 1 household use; `fake` is reserved for deterministic tests and smoke verification.
+`GeneratePostcardInput` includes the input snapshot and 1 to 5 decoded/source asset references. `GeneratedImage` contains provider PNG bytes plus the narrow provider metadata needed for internal logs. The configured provider is `openai` for normal Phase 1 household use; `fake` is reserved for deterministic tests and smoke verification.
 
-The worker calls the selected provider over outbound HTTPS using a Kubernetes Secret. It does not run foundation-model weights on the home server. An adapter is eligible for end-to-end generation only when its selected model can satisfy the fixed postcard PNG contract. Provider credentials, raw responses, and full prompts must not be written to artifacts or logs.
+The worker calls OpenAI over outbound HTTPS using the official Python SDK and a Kubernetes Secret. It does not run foundation-model weights on the home server. Provider credentials, raw responses, and full prompts must not be written to artifacts or logs.
+
+The OpenAI client must be constructed with `OpenAI(max_retries=0, timeout=480.0)`. No HTTP wrapper, sidecar, or service mesh may add provider-call retries. This overrides the Python SDK default retry behavior and makes one Worker invocation equal one outbound provider attempt.
+
+### Fixed OpenAI Request
+
+M1 uses the Image API edit endpoint because generation is grounded in 1 to 5 customer photos:
+
+```text
+endpoint: POST /v1/images/edits
+model: gpt-image-2-2026-04-21
+image: all 1 to 5 validated source photos in Task order
+prompt: server-built postcard instruction from the immutable Attempt snapshot
+n: 1
+quality: medium
+size: 1808x1200
+output_format: png
+```
+
+The dated model snapshot freezes M1 behavior. Changing the model, quality, or provider output size is a design change requiring fixture and real-provider E2E revalidation; it is not an unreviewed deployment toggle.
+
+`1800x1200` cannot be requested directly because GPT Image 2 requires each output edge to be divisible by 16. The adapter therefore requests `1808x1200`; after decoding the PNG, the worker removes exactly 4 pixels from the left edge and 4 pixels from the right edge. It does not scale, stretch, or use content-aware cropping. The normalized bytes are re-encoded as PNG and become the only candidate customer artifact.
+
+The first real-provider readiness check must use owned or repository-approved fixture photos and prove that the configured OpenAI account can access the model. OpenAI organization verification, if required for GPT Image access, is a deployment prerequisite rather than an application fallback.
 
 ### Deterministic Fake Provider
 
@@ -168,7 +196,7 @@ It is used for:
 - Safe demo fixtures.
 - End-to-end workflow verification without provider cost or network dependency.
 
-OpenAI and Anthropic adapters use the same `GenerationProvider` interface. Switching providers changes runtime configuration and adapter behavior, not the Task, Attempt, or Artifact contracts.
+The fake adapter implements the same `GenerationProvider` interface and returns a deterministic `1808x1200` PNG so tests exercise the same center-crop and verification path. Anthropic and other adapters are deferred beyond M1.
 
 ## Output Contract
 
@@ -185,6 +213,8 @@ format: image/png
 width: 1800
 height: 1200
 ```
+
+The provider response is an internal intermediate. Only the normalized and verified `1800x1200` PNG is stored at the customer artifact path.
 
 Artifact metadata:
 
@@ -244,11 +274,14 @@ Customer-facing Attempt failure metadata must be safe:
 {
   "status": "failed",
   "reason_code": "generation_failed",
-  "retryable": true
+  "retryable": false,
+  "new_attempt_allowed": true
 }
 ```
 
 Internal logs may retain a narrow failure category and platform/provider correlation ID, but must not contain secrets, signed URLs, raw images, credentials, or unnecessary customer content.
+
+Provider failure, output normalization failure, output verification failure, and job lease expiry all make the current Attempt terminal. No code path automatically calls the provider again. LLD-05 owns the conditional job finalization and expired-lease reconciliation that prevent a late Worker response from overwriting a terminal failure.
 
 ## Dependencies
 
@@ -274,13 +307,22 @@ LLD-03 provides:
 - The worker generates exactly one `1800x1200` postcard PNG.
 - Minimum output verification runs before `Attempt.status = ready`.
 - Generation or verification failures set `Attempt.status = failed`.
-- Duplicate commands do not create duplicate artifacts.
-- If private object storage contains a valid `postcard.png` but the Attempt update was interrupted, redelivery reuses the artifact and completes the missing Artifact metadata/Attempt status update.
+- The Worker makes at most one provider call for each Attempt.
+- Failure and lease expiry never re-enqueue or redeliver the generation command.
+- A late Worker response cannot overwrite an expired or failed job.
 - The fake provider runs without external credentials.
-- The configured OpenAI or Anthropic adapter runs through outbound HTTPS and receives its API key only from a server-side Secret.
+- The OpenAI adapter uses `gpt-image-2-2026-04-21` through `/v1/images/edits`, sends all 1 to 5 photos, requests one `medium`-quality `1808x1200` PNG, and receives its API key only from a server-side Secret.
+- The OpenAI SDK is configured with `max_retries=0`; no other transport layer retries the request.
+- The Worker center-crops the provider output to `1800x1200` before minimum verification.
 - No foundation model runs on the home server.
 - No ZIP, PDF, multi-artifact, marketplace, POD, NFT, or publishing side effect is introduced.
 
-## Provider Deployment Parameters
+## Provider Configuration
 
-The selected provider, model identifier, and API key are deployment parameters. They must not change the M1 output, status, idempotency, privacy, or minimum-verification contracts.
+`AI_ARTIST_GENERATION_PROVIDER` may be `openai` or `fake`. The production model, quality, provider output size, normalized output size, and no-retry rule are fixed M1 contracts. `OPENAI_API_KEY` is the only provider credential and remains a deployment Secret.
+
+Official references used to freeze this contract:
+
+- [GPT Image 2 model](https://developers.openai.com/api/docs/models/gpt-image-2)
+- [OpenAI image generation and edit guide](https://developers.openai.com/api/docs/guides/image-generation)
+- [Official OpenAI Python SDK retry configuration](https://github.com/openai/openai-python#retries)

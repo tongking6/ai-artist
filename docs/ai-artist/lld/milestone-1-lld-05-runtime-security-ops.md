@@ -8,13 +8,13 @@
 | Product milestone | M1: Memory Product Pack Agent |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
 | Status | Implementation-ready draft |
-| Scope owner | Home Kubernetes runtime, private storage, `Task`-link security, durable generation jobs, external AI-provider access, and retention |
+| Scope owner | Home Kubernetes runtime, private storage, `Task`-link security, single-delivery generation jobs, OpenAI access, and retention |
 
 ## Purpose
 
 LLD-05 defines the minimum Phase 1 runtime and security posture for the M1 `Task` -> `Attempt` -> postcard artifact workflow.
 
-Phase 1 runs on a home Linux server with a single-node Kubernetes cluster. The website and APIs are available only to trusted devices on the home LAN. The Generation Worker calls OpenAI and/or Anthropic over outbound HTTPS using server-side API keys; the home server does not run an AI model.
+Phase 1 runs on a home Linux server with a single-node Kubernetes cluster. The website and APIs are available only to trusted devices on the home LAN. The Generation Worker calls the OpenAI Image API over outbound HTTPS using a server-side API key; the home server does not run an AI model.
 
 AWS remains a possible later deployment target. M1 domain contracts must therefore stay independent of Kubernetes, PostgreSQL, MinIO, and AWS-specific SDK types.
 
@@ -26,7 +26,7 @@ AWS remains a possible later deployment target. M1 domain contracts must therefo
 - PostgreSQL Task/Attempt metadata and durable generation jobs.
 - Private S3-compatible object storage, with MinIO as the default Phase 1 implementation.
 - Short-lived upload/download constraints.
-- Kubernetes Secret handling for OpenAI and Anthropic API keys.
+- Kubernetes Secret handling for `OPENAI_API_KEY`.
 - Basic container logging and failed-job visibility.
 - Failed-job retention.
 - Minimum persistence and backup posture for private photos and generated artifacts.
@@ -55,7 +55,7 @@ flowchart LR
   DB -->|durable generation job| GW["Generation Worker Deployment"]
   GW --> OS
   GW --> DB
-  GW -->|outbound HTTPS| P["OpenAI or Anthropic API"]
+  GW -->|outbound HTTPS| P["OpenAI Image API"]
   U -->|short-lived download| OS
 ```
 
@@ -108,17 +108,22 @@ The internal job record supports:
 available
 leased
 completed
-dead
+failed
 ```
+
+Minimum internal fields are `job_id`, `attempt_id`, `idempotency_key`, `command_json`, `status`, `lease_token`, `lease_expires_at`, `failure_code`, `created_at`, and `updated_at`. `lease_token`, `lease_expires_at`, and `failure_code` are nullable outside their applicable states. There is no delivery-count or next-retry field in M1.
 
 Job delivery rules:
 
-- The worker claims one available job atomically and records a lease expiry.
+- The Worker claims one available job atomically, creates an unguessable `lease_token`, and records a lease expiry.
 - The M1 lease is 10 minutes and the provider call timeout is 8 minutes.
-- A worker restart after lease expiry makes unfinished work eligible for redelivery.
-- Redelivery is safe and must not create duplicate artifacts.
-- A job becomes `dead` after 3 failed deliveries.
-- Dead jobs are retained for 14 days and the associated Attempt is set to `failed` with a customer-safe reason.
+- A job may transition only `available -> leased -> completed` or `available -> leased -> failed`.
+- M1 never automatically re-enqueues or redelivers a claimed job. There is exactly one delivery and at most one provider call per Attempt.
+- Provider, storage, normalization, or verification failure moves the leased job and its Attempt to `failed` in one transaction.
+- A Worker startup sweep and 60-second periodic sweep mark expired `leased` jobs and their Attempts `failed`; neither path returns a job to `available`.
+- Completion is a conditional transaction requiring job status `leased`, the matching `lease_token`, an unexpired lease, and Attempt status `generating`.
+- If the provider returns after the lease expires or after terminal failure, the Worker discards the response and cannot write Artifact metadata or set the Attempt to `ready`.
+- Failed jobs are retained for 14 days with a customer-safe reason.
 - Job IDs and SQL row IDs are runtime details, not customer or cross-LLD domain identities.
 
 ## Private Object Storage
@@ -156,10 +161,11 @@ Provider-specific calls remain behind the LLD-03 `GenerationProvider` interface.
 
 Phase 1 rules:
 
-- `AI_ARTIST_GENERATION_PROVIDER` selects `openai`, `anthropic`, or `fake`.
-- `openai` and `anthropic` call the configured external API over outbound HTTPS.
+- `AI_ARTIST_GENERATION_PROVIDER` selects `openai` or `fake`.
+- `openai` calls the OpenAI Image API over outbound HTTPS using the fixed LLD-03 request contract.
+- The official OpenAI Python client is configured with `max_retries=0`; the Worker, HTTP transport, Ingress, and service mesh do not retry provider calls.
 - `fake` is allowed for deterministic local tests and smoke verification, not as the normal household generation mode.
-- Only a provider/model adapter that can satisfy the fixed postcard output contract may be enabled for end-to-end generation.
+- The production model is fixed to `gpt-image-2-2026-04-21`; Anthropic and other adapters are deferred.
 - The home Kubernetes cluster does not download or serve foundation-model weights.
 - Source photos, title, note, style, and refinement content may leave the home network when sent to the selected provider. The UI or operator documentation must make that boundary clear before non-fixture use.
 - Provider responses still pass LLD-03 minimum output verification before an Attempt becomes `ready`.
@@ -198,7 +204,7 @@ Rules:
 - Never commit API keys, `.env` files, or Secret manifests containing real values.
 - The Website Deployment receives no provider API key.
 - The Backend API does not need provider API keys unless a later contract explicitly requires it.
-- Only the Generation Worker receives `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY` for the configured provider.
+- Only the Generation Worker receives `OPENAI_API_KEY`.
 - Kubernetes Secret values are sensitive even though their manifest encoding may be base64; restrict namespace RBAC and host access accordingly.
 - Logs must not include keys, bearer tokens, presigned URLs, raw photos, full prompts, or unnecessary private notes.
 
@@ -237,17 +243,19 @@ Backend and storage configuration:
 | AI_ARTIST_DOWNLOAD_URL_TTL_SECONDS | Fixed at 900 seconds by default. |
 | AI_ARTIST_TASK_TOKEN_TTL_SECONDS | Fixed at 2592000 seconds by default. |
 | AI_ARTIST_JOB_LEASE_SECONDS | Fixed at 600 seconds for M1. |
-| AI_ARTIST_DEAD_JOB_RETENTION_DAYS | Fixed at 14 days for M1. |
+| AI_ARTIST_JOB_RECONCILE_INTERVAL_SECONDS | Fixed at 60 seconds for M1. |
+| AI_ARTIST_FAILED_JOB_RETENTION_DAYS | Fixed at 14 days for M1. |
 
 Generation Worker configuration:
 
 | Config | Purpose |
 | --- | --- |
-| AI_ARTIST_GENERATION_PROVIDER | `openai`, `anthropic`, or `fake`. |
-| AI_ARTIST_PROVIDER_MODEL | Provider-specific model identifier. |
+| AI_ARTIST_GENERATION_PROVIDER | `openai` for household generation or `fake` for deterministic tests. |
+| AI_ARTIST_OPENAI_IMAGE_MODEL | Fixed at `gpt-image-2-2026-04-21`. |
+| AI_ARTIST_OPENAI_IMAGE_QUALITY | Fixed at `medium`. |
+| AI_ARTIST_OPENAI_PROVIDER_SIZE | Fixed at `1808x1200`; LLD-03 center-crops to `1800x1200`. |
 | AI_ARTIST_PROVIDER_TIMEOUT_SECONDS | Fixed at 480 seconds for M1. |
-| OPENAI_API_KEY | OpenAI credential, supplied only when `openai` is selected. |
-| ANTHROPIC_API_KEY | Anthropic credential, supplied only when `anthropic` is selected. |
+| OPENAI_API_KEY | OpenAI credential, supplied only to the Generation Worker when `openai` is selected. |
 | LOG_LEVEL | Basic log verbosity. |
 
 ## Minimum Observability
@@ -255,7 +263,7 @@ Generation Worker configuration:
 Keep only:
 
 - Backend API and Generation Worker container logs.
-- PostgreSQL durable job status and dead-job count.
+- PostgreSQL durable job status and failed-job count.
 - Kubernetes Pod restart and readiness state.
 - Generation failure logs with `task_id`, `attempt_id`, safe failure category, and provider correlation ID when available.
 
@@ -271,7 +279,7 @@ Before using irreplaceable household photos:
 - Back up PostgreSQL and the private object-store data to a separate disk or another non-cluster location.
 - Verify at least one restore procedure before treating the system as durable storage.
 
-M1 does not implement application-data cleanup, archive tiers, or automatic disaster recovery. Task tokens expire 30 days after Task creation. Dead job records are retained for 14 days. Absence of HA does not remove the need to protect private photos or API keys.
+M1 does not implement application-data cleanup, archive tiers, or automatic disaster recovery. Task tokens expire 30 days after Task creation. Failed job records are retained for 14 days. Absence of HA does not remove the need to protect private photos or API keys.
 
 ## Future AWS Deployment
 
@@ -282,7 +290,7 @@ A future AWS implementation may replace runtime adapters with managed services, 
 - Customer API paths and payloads.
 - `Task`, `Asset`, `Attempt`, and `Artifact` identities and status rules.
 - The immutable `input.json` contract and object-key layout.
-- `StartGenerationCommand` semantics and idempotent redelivery.
+- `StartGenerationCommand` and single-delivery, terminal-failure semantics.
 - The `GenerationProvider` boundary.
 - Task-token, privacy, and log-redaction rules.
 
@@ -294,11 +302,13 @@ Kubernetes resource names, PostgreSQL row IDs, MinIO-specific APIs, AWS ARNs, SQ
 - No public tunnel, public DNS dependency, or Internet-facing load balancer is required.
 - Website, Backend API, Generation Worker, PostgreSQL, and object storage run on a single Kubernetes node with one replica each.
 - PostgreSQL atomically persists each Attempt and its durable generation job.
-- Lease expiry and redelivery do not create duplicate artifacts.
-- Jobs become dead after 3 failed deliveries and remain inspectable for 14 days.
+- Each Attempt receives at most one job delivery and one provider call.
+- The OpenAI SDK and surrounding transport are configured for zero provider-call retries.
+- Lease expiry marks the job and Attempt failed without redelivery, and conditional finalization rejects late Worker responses.
+- Failed jobs remain inspectable for 14 days.
 - Private object storage uses persistent storage and does not allow anonymous reads or listing.
 - Upload/download URLs are short-lived and use a LAN-reachable object-store endpoint.
-- OpenAI and Anthropic credentials exist only in server-side Secrets and never reach the browser or repository.
+- `OPENAI_API_KEY` exists only in a server-side Secret available to the Generation Worker and never reaches the browser or repository.
 - AI generation uses outbound provider APIs; no foundation model runs on the home server.
 - The UI or operator documentation makes the external-provider data boundary clear before non-fixture use.
 - Logs do not expose secrets, Task tokens, signed URLs, raw photos, full prompts, or unnecessary private content.
@@ -307,4 +317,4 @@ Kubernetes resource names, PostgreSQL row IDs, MinIO-specific APIs, AWS ARNs, SQ
 
 ## Deployment Parameters
 
-The Kubernetes distribution, LAN hostname and certificate, LAN CIDR, StorageClass, persistent-volume sizes, backup target, and selected provider/model are deployment parameters. They do not change the M1 domain or customer API contracts.
+The Kubernetes distribution, LAN hostname and certificate, LAN CIDR, StorageClass, persistent-volume sizes, backup target, and OpenAI account credential are deployment parameters. The M1 provider/model request contract is fixed by LLD-03 and is not a free deployment choice.

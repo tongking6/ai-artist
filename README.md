@@ -110,33 +110,24 @@ Start with digital product packs. Treat marketplace publishing as a later integr
 - Do not auto-publish products or mint NFTs without explicit user approval.
 - Keep output file names clear because marketplace buyers may see them directly.
 
-## Suggested Repository Shape
+## M1 Repository Shape
 
-The repo is currently documentation-first. A likely future structure is:
+The repo is currently documentation-first. [LLD-00](./docs/ai-artist/lld/milestone-1-lld-00-implementation-foundation.md) fixes the first implementation scaffold as:
 
 ```text
-docs/
-  <project>/
-    <doc-category>/
-src/
-  agents/
-  pipelines/
-  exporters/
-  quality/
-examples/
-  inputs/
-  outputs/
+apps/web/                    # Next.js + React + TypeScript
+services/backend/           # Python FastAPI API and Python Worker
+infra/kubernetes/           # Home Kubernetes runtime
+tests/e2e/                  # Fake-provider browser flow
 ```
-
-Do not create this full structure until the implementation direction is confirmed.
 
 ## Current Docs
 
 - [SETUP.md](./SETUP.md): required project, environment, marketplace, and quality settings.
 - [AGENTS.md](./AGENTS.md): instructions for future agent work in this repository.
 - [Milestone 1 PRFAQ](./docs/ai-artist/prfaq/milestone-1-scope.md): M1 customer promise, scope, pricing, success metrics, and launch assumptions.
-- [Milestone 1 HLD](./docs/ai-artist/hld/milestone-1-high-level-design.md): high-level product and technical design for the website, LAN-only home Kubernetes runtime, external AI-provider generation, and artifact delivery model.
-- [Milestone 1 LLDs](./docs/ai-artist/lld/README.md): implementation-ready low-level design set for website intake, backend lifecycle, generation, deferred QA/packaging, and the Phase 1 home runtime.
+- [Milestone 1 HLD](./docs/ai-artist/hld/milestone-1-high-level-design.md): high-level product and technical design for the website, LAN-only home Kubernetes runtime, OpenAI generation, and artifact delivery model.
+- [Milestone 1 LLDs](./docs/ai-artist/lld/README.md): implementation-ready low-level design set for the Next.js/React/TypeScript frontend, Python backend, intake lifecycle, OpenAI generation, deferred QA/packaging, and Phase 1 home runtime.
 
 ## Sources
 

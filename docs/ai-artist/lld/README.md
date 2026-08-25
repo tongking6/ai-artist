@@ -13,6 +13,7 @@
 
 | LLD | Title | Status |
 | --- | --- | --- |
+| [LLD-00](./milestone-1-lld-00-implementation-foundation.md) | Implementation Foundation | Implementation-ready |
 | [LLD-01](./milestone-1-lld-01-website-intake-status-delivery.md) | Website Task Intake, Status, Refinement, and Delivery UX | Implementation-ready draft |
 | [LLD-02](./milestone-1-lld-02-backend-api-lifecycle.md) | Backend API, Task Data Model, Attempts, Upload/Download Links | Implementation-ready draft |
 | [LLD-03](./milestone-1-lld-03-generation-worker.md) | Postcard Generation Worker and Minimum Verification | Implementation-ready draft |
@@ -80,7 +81,9 @@ tasks/{task_id}/
 - LLD-03 directly updates Attempt status.
 - LLD-03 generates exactly one `1800x1200` PNG.
 - LLD-03 performs minimum verification before setting `ready`.
-- LLD-03 calls the configured OpenAI or Anthropic provider over outbound HTTPS; the fake provider remains available for deterministic tests.
+- LLD-03 makes at most one OpenAI Image API call per Attempt using `gpt-image-2-2026-04-21`; the fake provider remains available for deterministic tests.
+- The OpenAI adapter requests a `1808x1200` PNG and the Worker deterministically center-crops it to the fixed `1800x1200` artifact contract.
+- A claimed generation job is never automatically retried or redelivered in M1.
 - LLD-04 is not required.
 
 ### Customer Access
@@ -107,11 +110,12 @@ Customer download is a fresh short-lived URL for a ready postcard Artifact only.
 
 ## Implementation Order
 
-1. LLD-02 Task/Asset/Attempt persistence and customer API.
-2. LLD-05 single-node home Kubernetes runtime, PostgreSQL, private S3-compatible storage, and durable job retention.
-3. LLD-01 website intake, upload, status, refinement, and download UX.
-4. LLD-03 external AI-provider generation, deterministic fake-provider tests, and minimum verification.
-5. End-to-end verification for one-photo, five-photo, refinement, failure, and artifact download flows.
+1. LLD-00 Next.js/React/TypeScript frontend and Python backend foundation.
+2. LLD-02 Task/Asset/Attempt persistence and customer API.
+3. LLD-05 single-node home Kubernetes runtime, PostgreSQL, private S3-compatible storage, and single-delivery job retention.
+4. LLD-01 website intake, upload, status, refinement, and download UX.
+5. LLD-03 OpenAI generation, deterministic fake-provider tests, normalization, and minimum verification.
+6. End-to-end verification for one-photo, five-photo, refinement, terminal failure, and artifact download flows.
 
 ## Deferred Features
 

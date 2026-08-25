@@ -14,9 +14,9 @@
 
 M1 is a narrow website-first workflow. A user creates a `Task`, uploads 1 to 5 photos, and provides a title, note, and style. The system creates one or more immutable generation `Attempt`s, each with a complete input snapshot and an optional refinement note. Each successful Attempt produces exactly one `1800x1200` postcard PNG.
 
-M1 proves the intake -> upload -> asynchronous generation -> status -> download loop on a home Linux server running a single-node Kubernetes cluster. It is accessible only from the trusted home LAN. AI inference runs through outbound OpenAI and/or Anthropic API calls; the home server does not host a model. M1 intentionally does not implement a product pack, rights workflow, automated QA gate, packaging, accounts, payments, marketplace publishing, POD, NFT, email delivery, public Internet access, or high availability.
+M1 proves the intake -> upload -> asynchronous generation -> status -> download loop on a home Linux server running a single-node Kubernetes cluster. It is accessible only from the trusted home LAN. AI inference runs through the OpenAI Image API; the home server does not host a model. M1 intentionally does not implement a product pack, rights workflow, automated QA gate, packaging, accounts, payments, marketplace publishing, POD, NFT, email delivery, public Internet access, or high availability.
 
-Implementation details and field-level contracts are owned by [LLD-01](../lld/milestone-1-lld-01-website-intake-status-delivery.md), [LLD-02](../lld/milestone-1-lld-02-backend-api-lifecycle.md), [LLD-03](../lld/milestone-1-lld-03-generation-worker.md), and [LLD-05](../lld/milestone-1-lld-05-runtime-security-ops.md). [LLD-04](../lld/milestone-1-lld-04-qa-packaging-delivery.md) is deferred.
+Implementation details and field-level contracts are owned by [LLD-00](../lld/milestone-1-lld-00-implementation-foundation.md), [LLD-01](../lld/milestone-1-lld-01-website-intake-status-delivery.md), [LLD-02](../lld/milestone-1-lld-02-backend-api-lifecycle.md), [LLD-03](../lld/milestone-1-lld-03-generation-worker.md), and [LLD-05](../lld/milestone-1-lld-05-runtime-security-ops.md). [LLD-04](../lld/milestone-1-lld-04-qa-packaging-delivery.md) is deferred.
 
 ## 2. M1 Decisions
 
@@ -29,10 +29,11 @@ Implementation details and field-level contracts are owned by [LLD-01](../lld/mi
 | Generation execution | `Attempt` with a complete immutable snapshot |
 | Refinement | Only `refinement_note` is mutable between Attempts |
 | Output | One `1800x1200` `image/png` postcard per successful Attempt |
-| Provider | External OpenAI and/or Anthropic API adapter; deterministic fake provider for tests |
+| Application stack | Next.js, React, and TypeScript frontend; Python FastAPI backend and Python Worker |
+| Provider | OpenAI Image API with `gpt-image-2-2026-04-21`; deterministic fake provider for tests |
 | Runtime | Single-node Kubernetes on a home Linux server |
 | Network exposure | Trusted home LAN only; no public ingress or router port forwarding |
-| Async delivery | PostgreSQL-backed job queue and Generation Worker Deployment |
+| Async delivery | PostgreSQL-backed job queue; one claim and no automatic retry per Attempt |
 | Customer access | Task-link bearer token, valid for 30 days |
 | Data cleanup | No application-data cleanup, archive, or complex recovery in M1 |
 | Failed-job retention | 14 days |
@@ -84,7 +85,7 @@ Attempt status:
 - `queued`: generation command is waiting in the PostgreSQL-backed job queue.
 - `generating`: the Generation Worker owns the Attempt.
 - `ready`: postcard artifact is available.
-- `failed`: generation failed and a retry/refinement is available.
+- `failed`: generation failed; the failed Attempt is terminal and the user may create a new refinement Attempt.
 
 ## 5. System Context
 
@@ -99,7 +100,7 @@ flowchart LR
   U -->|short-lived upload| O
   API --> Q[PostgreSQL Job Table]
   Q --> GW[Generation Worker Deployment]
-  GW --> P[OpenAI or Anthropic API]
+  GW --> P[OpenAI Image API]
   GW --> O
   GW --> DB
   U -->|short-lived download| O
@@ -124,7 +125,7 @@ Runtime responsibilities:
 4. The user selects `Done adding photos`; the backend validates title, note, style, 1–5 uploaded Assets, and no pending slots, then sets the Task to `ready`.
 5. `Generate` creates Attempt 1 with a complete immutable snapshot and status `queued`.
 6. The backend atomically persists the Attempt and its `StartGenerationCommand` job in PostgreSQL.
-7. The Generation Worker claims the job, calls the configured OpenAI or Anthropic adapter, performs minimum output verification, writes Artifact metadata, and directly updates the Attempt to `ready` or `failed`.
+7. The Generation Worker claims the job once, calls the OpenAI `gpt-image-2-2026-04-21` adapter once, normalizes the provider image to the fixed postcard dimensions, performs minimum output verification, writes Artifact metadata, and directly updates the Attempt to `ready` or `failed`.
 8. The browser polls Task metadata or Attempt history.
 9. For a ready Artifact, the backend returns only a short-lived presigned download URL.
 10. A refinement submits only `refinement_note` and creates a later Attempt after no Attempt is `queued` or `generating`.
@@ -162,7 +163,7 @@ Storage references remain internal. Customer APIs expose artifact metadata and, 
 - Tokens are sent only in the `Authorization` header and are never logged or accepted in query strings, paths, cookies, or request bodies.
 - Uploads accept only JPEG/PNG, up to 20 MB per photo and 5 photos per Task.
 - Upload and download URLs have a default TTL of 15 minutes.
-- OpenAI and Anthropic API keys are server-side Kubernetes Secrets, are never committed or returned to the browser, and are available only to the Generation Worker.
+- `OPENAI_API_KEY` is a server-side Kubernetes Secret, is never committed or returned to the browser, and is available only to the Generation Worker.
 - The home server needs outbound HTTPS access to the selected AI provider; no AI model runs locally.
 - The Generation Worker cannot issue customer download URLs or modify unrelated Tasks.
 - Phase 1 uses one Kubernetes node and one replica per stateful or worker component; planned downtime and node failure are accepted.
@@ -178,8 +179,9 @@ AWS remains a possible later deployment target if public access, managed durabil
 
 The reconciled LLD set is the implementation source of truth:
 
-1. LLD-02: Task/Asset/Attempt persistence and customer APIs.
-2. LLD-05: LAN-only home Kubernetes runtime, PostgreSQL, private object storage, job delivery, secrets, and security.
-3. LLD-01: website intake, upload, status, refinement, and download UX.
-4. LLD-03: external AI-provider generation, deterministic fake-provider tests, and minimum verification.
-5. End-to-end verification for one-photo, five-photo, refinement, failure, redelivery, and artifact download flows.
+1. LLD-00: Next.js/React/TypeScript frontend and Python backend foundation.
+2. LLD-02: Task/Asset/Attempt persistence and customer APIs.
+3. LLD-05: LAN-only home Kubernetes runtime, PostgreSQL, private object storage, single-delivery jobs, secrets, and security.
+4. LLD-01: website intake, upload, status, refinement, and download UX.
+5. LLD-03: OpenAI generation, deterministic fake-provider tests, normalization, and minimum verification.
+6. End-to-end verification for one-photo, five-photo, refinement, terminal failure, and artifact download flows.

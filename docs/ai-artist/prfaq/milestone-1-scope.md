@@ -116,7 +116,7 @@ Because the target user is not an engineer. The UI is the Phase 1 product experi
 - Pack tier selection.
 - Durable Task/Attempt workflow and immutable `input.json` contract.
 - Customer-facing postcard PNG download.
-- External OpenAI and/or Anthropic generation through server-side API credentials.
+- OpenAI Image API generation with `gpt-image-2-2026-04-21` through a server-side API credential.
 - Fake-provider or fixture-based smoke test for repeatable verification.
 
 ### What is out of scope?

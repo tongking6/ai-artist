@@ -24,7 +24,7 @@ Phase 1 runs on a home Linux server with a single-node Kubernetes cluster.
 - Do not configure router port forwarding, UPnP exposure, a public tunnel, public DNS, or an Internet-facing load balancer.
 - Use a private LAN hostname and a locally trusted HTTPS certificate for Task tokens and photo transfer.
 - High availability and automatic failover are not required.
-- AI inference uses outbound OpenAI and/or Anthropic API calls. The home server does not host a foundation model.
+- AI inference uses the outbound OpenAI Image API. The home server does not host a foundation model.
 - Keep original photos outside AI Artist and back up PostgreSQL and private object storage before relying on the system for irreplaceable household photos.
 
 AWS may be added later if public access, managed durability, scaling, or HA becomes necessary. Phase 1 application contracts must not depend on AWS SDK types or AWS resource identifiers.
@@ -34,13 +34,15 @@ AWS may be added later if public access, managed durability, scaling, or HA beco
 Recommended local env file once implementation begins:
 
 ```bash
-# Select one external AI provider for normal generation
+# M1 household generation; use fake only for deterministic tests
 AI_ARTIST_GENERATION_PROVIDER=openai
-AI_ARTIST_PROVIDER_MODEL=
+AI_ARTIST_OPENAI_IMAGE_MODEL=gpt-image-2-2026-04-21
+AI_ARTIST_OPENAI_IMAGE_QUALITY=medium
+AI_ARTIST_OPENAI_PROVIDER_SIZE=1808x1200
+AI_ARTIST_PROVIDER_TIMEOUT_SECONDS=480
 
-# Supply only the key required by the selected provider
+# Supplied only to the Generation Worker
 OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
 
 # Home Kubernetes runtime
 AI_ARTIST_STAGE=home
@@ -72,7 +74,19 @@ NFT_NETWORK=
 OPENSEA_API_KEY=
 ```
 
-Do not commit real `.env` files, API keys, database credentials, or Kubernetes Secret manifests containing values. Create provider keys directly in the cluster or through an equivalent local secret workflow. Only the Generation Worker receives `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY`; the browser never receives them.
+Do not commit real `.env` files, API keys, database credentials, or Kubernetes Secret manifests containing values. Create the OpenAI key directly in the cluster or through an equivalent local secret workflow. Only the Generation Worker receives `OPENAI_API_KEY`; the browser and Backend API never receive it. The OpenAI organization must be verified if GPT Image access requires verification for the configured account.
+
+## M1 Application Foundation
+
+- Website: Next.js App Router, React, and TypeScript.
+- Backend API: Python with FastAPI and Pydantic.
+- Generation Worker: Python, sharing the backend domain package while running as a separate process.
+- Persistence: PostgreSQL with SQLAlchemy 2 and Alembic.
+- Object storage: S3-compatible adapter with MinIO in Phase 1.
+- Provider SDK: official OpenAI Python SDK.
+- Image normalization: Pillow.
+
+The OpenAI adapter sends all 1 to 5 photos through `/v1/images/edits`, requests one `1808x1200` PNG, and center-crops 4 pixels from each horizontal edge to produce the fixed `1800x1200` artifact. Construct the official Python client with `OpenAI(max_retries=0, timeout=480.0)` and do not add transport retries. M1 does not automatically retry a claimed generation job.
 
 ## M1 Product Settings
 
