@@ -126,7 +126,7 @@ tests/e2e/                  # Fake-provider browser flow
 - [SETUP.md](./SETUP.md): required project, environment, marketplace, and quality settings.
 - [AGENTS.md](./AGENTS.md): instructions for future agent work in this repository.
 - [Milestone 1 PRFAQ](./docs/ai-artist/prfaq/milestone-1-scope.md): M1 customer promise, scope, pricing, success metrics, and launch assumptions.
-- [Milestone 1 HLD](./docs/ai-artist/hld/milestone-1-high-level-design.md): high-level product and technical design for the website, LAN-only home Kubernetes runtime, OpenAI generation, and artifact delivery model.
+- [Milestone 1 HLD](./docs/ai-artist/hld/milestone-1-high-level-design.md): high-level product and technical design for the website, tailnet-only home K3s runtime, OpenAI generation, and artifact delivery model.
 - [Milestone 1 LLDs](./docs/ai-artist/lld/README.md): implementation-ready low-level design set for the Next.js/React/TypeScript frontend, Python backend, intake lifecycle, OpenAI generation, deferred QA/packaging, and Phase 1 home runtime.
 
 ## Sources

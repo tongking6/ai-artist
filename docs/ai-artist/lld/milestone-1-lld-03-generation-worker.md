@@ -7,7 +7,7 @@
 | LLD | LLD-03 |
 | Product milestone | M1: `Memory Product Pack Agent` |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Implementation-ready draft |
+| Status | Implementation-ready; provider and prompt contracts finalized |
 | Scope owner | Postcard generation, minimum output verification, artifact metadata, and Attempt status updates |
 
 ## Purpose
@@ -67,11 +67,20 @@ The input snapshot is the generation source of truth:
 
 ```json
 {
+  "schema_version": "m1.attempt_input.v1",
+  "task_id": "task_01J...",
   "photo_asset_ids": ["asset_01J...", "asset_02J..."],
   "title": "Spring Walk in Kyoto",
   "note": "A quiet spring afternoon",
   "style": "warm_handmade",
-  "refinement_note": "Use softer colors and a larger title"
+  "prompt_recipe_version": "m1.postcard_prompt.v1",
+  "refinement_note": "Use softer colors and make the garden more prominent",
+  "output": {
+    "artifact_type": "postcard",
+    "format": "png",
+    "width": 1800,
+    "height": 1200
+  }
 }
 ```
 
@@ -79,6 +88,7 @@ Rules:
 
 - LLD-03 does not create `task_id` or `attempt_id`.
 - LLD-03 does not modify the input snapshot.
+- LLD-03 rejects an unsupported `prompt_recipe_version`; it must not silently use the latest deployed recipe.
 - Source Asset rows must match the snapshot photo references and the same Task.
 - The partial unique active-Attempt index and conditional claim prevent duplicate active execution for one Task.
 - Platform invocation IDs may be used in logs only; they are not domain fields or cross-service contract fields.
@@ -163,19 +173,72 @@ M1 uses the Image API edit endpoint because generation is grounded in 1 to 5 cus
 ```text
 endpoint: POST /v1/images/edits
 model: gpt-image-2-2026-04-21
-image: all 1 to 5 validated source photos in Task order
-prompt: server-built postcard instruction from the immutable Attempt snapshot
+image: all 1 to 5 validated source photos in snapshot array order for transport only
+prompt: server-built m1.postcard_prompt.v1 instruction from the immutable Attempt snapshot
 n: 1
 quality: medium
 size: 1808x1200
 output_format: png
 ```
 
+The adapter sends the photos in `photo_asset_ids` array order only to make request construction deterministic. That order has no product meaning: the prompt treats the photos as an unordered reference set and does not make the first photo primary.
+
 The dated model snapshot freezes M1 behavior. Changing the model, quality, or provider output size is a design change requiring fixture and real-provider E2E revalidation; it is not an unreviewed deployment toggle.
 
 `1800x1200` cannot be requested directly because GPT Image 2 requires each output edge to be divisible by 16. The adapter therefore requests `1808x1200`; after decoding the PNG, the worker removes exactly 4 pixels from the left edge and 4 pixels from the right edge. It does not scale, stretch, or use content-aware cropping. The normalized bytes are re-encoded as PNG and become the only candidate customer artifact.
 
 The first real-provider readiness check must use owned or repository-approved fixture photos and prove that the configured OpenAI account can access the model. OpenAI organization verification, if required for GPT Image access, is a deployment prerequisite rather than an application fallback.
+
+### Prompt Recipe: `m1.postcard_prompt.v1`
+
+The backend renders one server-owned prompt from the immutable Attempt snapshot. `title`, `note`, and `refinement_note` are delimited customer data and are interpreted only as creative guidance; they do not replace the server-owned constraints.
+
+```text
+Create one landscape travel-memory postcard artwork grounded in all supplied
+reference photos.
+
+REFERENCE SET
+- Treat the supplied photos as an unordered set with no first-image priority.
+- Identify the shared people, place, event, and strongest scene anchors.
+- Synthesize one coherent scene rather than a default grid or literal collage.
+
+NON-NEGOTIABLE PRESERVATION
+- Keep each depicted person's recognizable identity, facial structure, and
+  distinguishing features faithful to the references.
+- Preserve the essential people and major scene anchors that make the memory
+  recognizable.
+- Do not invent a different identity or replace the memory with an unrelated
+  location or event.
+
+CREATIVE DIRECTION
+- Creatively recompose the scene when it improves the memory: adjust framing,
+  layout, lighting, atmosphere, palette, background simplification, and subtle
+  decorative details in ways that fit the referenced scene.
+- Keep the result cohesive and believable as one travel-memory artwork.
+
+STYLE: warm_handmade
+- Use a warm handmade postcard aesthetic with hand-painted character, natural
+  colors, soft organic texture, gentle paper or brush detail, and an intimate,
+  nostalgic mood.
+- Avoid extreme cartoon distortion that damages identity or scene recognition.
+
+CUSTOMER GUIDANCE
+- Title context: <title>
+- Memory guidance: <note>
+- Use both as visual and thematic guidance only.
+- Do not render the title, note, refinement instruction, captions, typography,
+  signatures, or watermarks into the image.
+
+ADDITIVE REFINEMENT
+- Additional guidance: <refinement_note or "none">
+- When present, add this guidance to the base recipe; do not replace the base
+  recipe, preservation rules, style, or output rules.
+
+OUTPUT
+- Produce exactly one landscape composition for the requested PNG output.
+```
+
+The `refinement_note` is additive to the same base recipe. It may refine emphasis, composition, color, or atmosphere, but it cannot remove identity preservation, major-scene preservation, the no-visible-customer-text rule, or the fixed output contract. M1 creates each Attempt from the original source-photo set; it does not feed the previous generated postcard back to the provider.
 
 ### Deterministic Fake Provider
 
@@ -264,11 +327,11 @@ Customer-facing Attempt failure metadata must be safe:
 ```json
 {
   "status": "failed",
-  "reason_code": "generation_failed",
-  "retryable": false,
-  "new_attempt_allowed": true
+  "failure_code": "generation_failed"
 }
 ```
+
+The customer API derives the available next action from Attempt status. A failed Attempt is terminal and is never retried; the UI may offer the existing user-initiated refinement action, which creates a distinct Attempt.
 
 Internal logs may retain a narrow failure category and platform/provider correlation ID, but must not contain secrets, signed URLs, raw images, credentials, or unnecessary customer content.
 
@@ -294,7 +357,12 @@ LLD-03 provides:
 - LLD-03 atomically claims the oldest queued Attempt from PostgreSQL.
 - No separate `generation_job_id`, `generation_version`, or `latest_eligible_attempt_id` is used.
 - The worker reads the immutable Attempt snapshot.
+- The snapshot fixes `prompt_recipe_version = m1.postcard_prompt.v1`.
 - The worker supports 1 to 5 source photos.
+- Source-photo order has no product semantics and does not select a primary photo.
+- The prompt preserves recognizable people and major scene anchors while allowing scene-aware creative recomposition.
+- `title`, `note`, and `refinement_note` guide the visual result but are not rendered as visible customer text.
+- A refinement note supplements rather than replaces the base prompt recipe.
 - The worker generates exactly one `1800x1200` postcard PNG.
 - Minimum output verification runs before `Attempt.status = ready`.
 - Generation or verification failures set `Attempt.status = failed`.
@@ -316,4 +384,5 @@ Official references used to freeze this contract:
 
 - [GPT Image 2 model](https://developers.openai.com/api/docs/models/gpt-image-2)
 - [OpenAI image generation and edit guide](https://developers.openai.com/api/docs/guides/image-generation)
+- [GPT Image generation models prompting guide](https://developers.openai.com/cookbook/examples/multimodal/image-gen-models-prompting-guide)
 - [Official OpenAI Python SDK retry configuration](https://github.com/openai/openai-python#retries)

@@ -8,7 +8,7 @@
 | Product milestone | M1: `Memory Product Pack Agent` |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
 | Status | Implementation-ready; PostgreSQL schema and customer API finalized |
-| Scope owner | Backend API, lifecycle, LAN-only access contract, upload/download contracts, attempt input snapshots, and attempt metadata |
+| Scope owner | Backend API, lifecycle, Tailscale access contract, upload/download contracts, attempt input snapshots, and attempt metadata |
 
 ## Purpose
 
@@ -19,7 +19,7 @@ LLD-02 is the source of truth for task lifecycle and attempt metadata.
 ## In Scope
 
 - Task creation.
-- Phase 1 LAN-only application access.
+- Phase 1 tailnet-only application access.
 - Upload-slot creation and uploaded asset metadata.
 - Input completeness validation.
 - Immutable Attempt `input_snapshot` JSONB creation.
@@ -434,18 +434,18 @@ Task rules:
 - After any Attempt exists, these base inputs are immutable.
 - Rights, copyright, and amendment workflows are not part of this first version.
 
-## Phase 1 LAN Access Model
+## Phase 1 Tailscale Access Model
 
 Task route:
 
 ```text
-https://ai-artist.home.arpa/tasks/{task_id}
+https://tongjin-server.tail910d5f.ts.net/tasks/{task_id}
 ```
 
 Rules:
 
 - Phase 1 has no application-layer login, Task token, or `Authorization` header.
-- Any device admitted to the trusted home LAN can call the customer API and open a known Task route.
+- Any device permitted by the tailnet policy can call the customer API and open a known Task route.
 - `task_id` is a resource identifier, not an authorization credential.
 - Nested Asset and Artifact routes still require the resource to belong to the path Task; missing and cross-Task resources both return the same `404` code.
 - Authentication and authorization must be designed before any public Internet or future AWS-facing exposure.
@@ -462,7 +462,7 @@ Each upload slot item has this shape:
   "asset_id": "asset_01",
   "client_file_id": "file_01J...",
   "upload_method": "presigned_post",
-  "upload_url": "https://objects.ai-artist.home.arpa/ai-artist-private",
+  "upload_url": "https://tongjin-server.tail910d5f.ts.net/ai-artist-private",
   "expires_at": "2026-08-22T00:15:00Z",
   "fields": {
     "key": "server-owned-key",
@@ -486,7 +486,7 @@ The upload-slots endpoint always returns an array envelope:
       "asset_id": "asset_01J...",
       "client_file_id": "file_01J...",
       "upload_method": "presigned_post",
-      "upload_url": "https://objects.ai-artist.home.arpa/ai-artist-private",
+      "upload_url": "https://tongjin-server.tail910d5f.ts.net/ai-artist-private",
       "expires_at": "2026-08-25T12:15:00Z",
       "fields": {},
       "constraints": {
@@ -498,7 +498,7 @@ The upload-slots endpoint always returns an array envelope:
 }
 ```
 
-`slot_id` is a response identifier deterministically derived from `asset_id`; it is not a database column. `upload_url` is the LAN-reachable MinIO/S3-compatible target. Presigned POST URLs and fields are generated on demand and never persisted.
+`slot_id` is a response identifier deterministically derived from `asset_id`; it is not a database column. `upload_url` is the tailnet-only MinIO/S3-compatible target on the canonical HTTPS origin. Presigned POST URLs and fields are generated on demand and never persisted.
 
 Rules:
 
@@ -571,7 +571,8 @@ Every attempt stores a complete input snapshot:
     "title": "Spring Walk in Kyoto",
     "note": "A quiet spring afternoon",
     "style": "warm_handmade",
-    "refinement_note": "Use softer colors and a larger title"
+    "prompt_recipe_version": "m1.postcard_prompt.v1",
+    "refinement_note": "Use softer colors and make the garden more prominent"
   },
   "provider_id": "openai",
   "provider_model": "gpt-image-2-2026-04-21",
@@ -617,7 +618,8 @@ Normative shape:
   "title": "Spring Walk in Kyoto",
   "note": "A quiet spring afternoon",
   "style": "warm_handmade",
-  "refinement_note": "Use softer colors and a larger title",
+  "prompt_recipe_version": "m1.postcard_prompt.v1",
+  "refinement_note": "Use softer colors and make the garden more prominent",
   "output": {
     "artifact_type": "postcard",
     "format": "png",
@@ -632,6 +634,7 @@ Rules:
 - `input_snapshot` must not contain secrets.
 - `attempt_id` is execution metadata and is not part of the customer input snapshot.
 - The Attempt input snapshot is immutable after the Attempt is inserted.
+- `prompt_recipe_version` is exactly `m1.postcard_prompt.v1`; the Worker must not substitute a later deployed recipe for an existing Attempt.
 - M1 has one fixed postcard PNG target.
 
 ## Attempt Creation
@@ -666,7 +669,7 @@ LLD-03 claims and directly updates this Attempt row. M1 does not require a `Star
 
 ## Customer API Contract
 
-Phase 1 exposes nine Backend API operations. None uses application-layer authentication while the application remains inside the trusted home LAN.
+Phase 1 exposes nine Backend API operations. None uses application-layer authentication while the application remains inside the approved Tailscale tailnet boundary.
 
 | API | Purpose | Success | Response |
 | --- | --- | ---: | --- |
@@ -833,7 +836,7 @@ Later refinement request:
 
 ```json
 {
-  "refinement_note": "Use softer colors and a larger title"
+  "refinement_note": "Use softer colors and make the garden more prominent"
 }
 ```
 
@@ -883,7 +886,7 @@ Response:
 ```json
 {
   "artifact_id": "artifact_01J...",
-  "download_url": "https://objects.ai-artist.home.arpa/...",
+  "download_url": "https://tongjin-server.tail910d5f.ts.net/ai-artist-private/...",
   "expires_at": "2026-08-25T14:30:00Z"
 }
 ```
@@ -904,7 +907,7 @@ LLD-02 depends on:
 
 - LLD-01 for intake fields and customer-safe state display needs.
 - LLD-03 for queued-Attempt claiming, artifact readiness metadata, and direct Attempt status updates.
-- LLD-05 for the LAN access boundary, runtime storage prefix, workload access, Attempt lease handling, retention, log-redaction constraints, and presigned URL posture.
+- LLD-05 for the Tailscale access boundary, runtime storage prefix, workload access, Attempt lease handling, retention, log-redaction constraints, and presigned URL posture.
 
 LLD-02 provides:
 
@@ -912,11 +915,11 @@ LLD-02 provides:
 - Attempt `input_snapshot` JSONB.
 - Attempt metadata.
 - Upload/download APIs.
-- Phase 1 LAN-only access contract.
+- Phase 1 tailnet-only access contract.
 
 ## Acceptance Checks
 
-- Phase 1 stores no Task credential and customer APIs require no application `Authorization` header while LAN-only.
+- Phase 1 stores no Task credential and customer APIs require no application `Authorization` header while tailnet-only.
 - Customer timestamps map PostgreSQL `timestamptz` to UTC RFC3339 strings with `Z`.
 - `PATCH /v1/tasks/{task_id}` persists only title, note, and style before the Task is ready or any Attempt exists.
 - Task metadata validation is `title` 1–120 characters, `note` 1–1000 characters, and `style = warm_handmade`.

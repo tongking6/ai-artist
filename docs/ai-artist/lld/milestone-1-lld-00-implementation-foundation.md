@@ -62,7 +62,7 @@ The scaffold may add framework-generated support files, but it must preserve the
 
 ### Website
 
-- Next.js renders the LAN-only customer experience defined by LLD-01.
+- Next.js renders the tailnet-only customer experience defined by LLD-01.
 - Browser code calls the FastAPI customer API and uploads/downloads through backend-issued short-lived object-store instructions.
 - The frontend receives no database, object-store, or OpenAI credentials.
 - M1 does not require Next.js server actions or a second application API layer; FastAPI is the customer API authority.
@@ -89,7 +89,7 @@ The scaffold may add framework-generated support files, but it must preserve the
 | Screens and upload/status/download UX | LLD-01 |
 | HTTP payloads, Task/Asset/Attempt/Artifact models | LLD-02 |
 | OpenAI request, output normalization, and minimum verification | LLD-03 |
-| Kubernetes, PostgreSQL Attempt queue, MinIO, Secrets, LAN boundary | LLD-05 |
+| K3s, PostgreSQL Attempt queue, MinIO, Secrets, Tailscale boundary | LLD-05 |
 
 FastAPI's generated OpenAPI document may be used to generate or validate TypeScript client types. It must not become a competing hand-written contract.
 

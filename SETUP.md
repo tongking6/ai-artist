@@ -18,13 +18,14 @@ Only run these after confirming the local repo should be connected to that GitHu
 
 ## Phase 1 Runtime
 
-Phase 1 runs on a home Linux server with a single-node Kubernetes cluster.
+Phase 1 runs on a home Linux server with a single-node K3s cluster.
 
-- Access is limited to trusted devices on the home LAN.
-- Do not configure router port forwarding, UPnP exposure, a public tunnel, public DNS, or an Internet-facing load balancer.
-- Use a private LAN hostname and a locally trusted HTTPS certificate for photo transfer.
+- Access is limited to approved devices in the owner's Tailscale tailnet; home devices use the same canonical tailnet URL.
+- Use `https://tongjin-server.tail910d5f.ts.net` through persistent Tailscale Serve; never enable Tailscale Funnel.
+- Do not configure router port forwarding, UPnP exposure, public DNS, a public tunnel, or an Internet-facing load balancer.
+- K3s ServiceLB is disabled; bundled Traefik is reachable only through loopback `NodePort 30080`, behind Tailscale Serve.
 - High availability and automatic failover are not required.
-- Phase 1 has no application-layer login or Task-token authentication; trusted home-LAN access is the application boundary.
+- Phase 1 has no application-layer login or Task-token authentication; approved tailnet access is the application boundary.
 - AI inference uses the outbound OpenAI Image API. The home server does not host a foundation model.
 - Keep original photos outside AI Artist and back up PostgreSQL and private object storage before relying on the system for irreplaceable household photos.
 
@@ -47,8 +48,10 @@ OPENAI_API_KEY=
 
 # Home Kubernetes runtime
 AI_ARTIST_STAGE=home
-AI_ARTIST_API_BASE_URL=https://ai-artist.home.arpa/api
-AI_ARTIST_OBJECT_PRESIGN_ENDPOINT=https://objects.ai-artist.home.arpa
+AI_ARTIST_PUBLIC_BASE_URL=https://tongjin-server.tail910d5f.ts.net
+AI_ARTIST_API_BASE_URL=https://tongjin-server.tail910d5f.ts.net
+AI_ARTIST_OBJECT_PRESIGN_ENDPOINT=https://tongjin-server.tail910d5f.ts.net
+AI_ARTIST_OBJECT_ADDRESSING_STYLE=path
 AI_ARTIST_PRIVATE_BUCKET=ai-artist-private
 AI_ARTIST_DATABASE_URL=
 

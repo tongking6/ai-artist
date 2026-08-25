@@ -7,21 +7,22 @@
 | LLD | LLD-05 |
 | Product milestone | M1: Memory Product Pack Agent |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Implementation-ready draft |
-| Scope owner | Home Kubernetes runtime, LAN access boundary, private storage, queued-Attempt delivery, OpenAI access, and retention |
+| Status | Implementation-ready; home deployment profile finalized |
+| Scope owner | Home Kubernetes runtime, Tailscale access boundary, private storage, queued-Attempt delivery, OpenAI access, and retention |
 
 ## Purpose
 
 LLD-05 defines the minimum Phase 1 runtime and security posture for the M1 `Task` -> `Attempt` -> postcard artifact workflow.
 
-Phase 1 runs on a home Linux server with a single-node Kubernetes cluster. The website and APIs are available only to trusted devices on the home LAN. The Generation Worker calls the OpenAI Image API over outbound HTTPS using a server-side API key; the home server does not run an AI model.
+Phase 1 runs on a home Linux server with a single-node K3s cluster. The complete customer workflow is available only to authorized devices in the owner's Tailscale tailnet. LAN devices use the same Tailscale URL rather than a separate LAN ingress. The Generation Worker calls the OpenAI Image API over outbound HTTPS using a server-side API key; the home server does not run an AI model.
 
 AWS remains a possible later deployment target. M1 domain contracts must therefore stay independent of Kubernetes, PostgreSQL, MinIO, and AWS-specific SDK types.
 
 ## In Scope
 
-- Single-node Kubernetes runtime on a home Linux server.
-- LAN-only website, API, and object upload/download access.
+- Single-node K3s runtime on the approved home Linux server.
+- Tailnet-only website, API, and object upload/download access through Tailscale Serve.
+- One canonical MagicDNS hostname and automatically managed tailnet HTTPS.
 - Website, Backend API, and Generation Worker Deployments.
 - PostgreSQL Task/Asset/Attempt/Artifact metadata and durable queued Attempts.
 - Private S3-compatible object storage, with MinIO as the default Phase 1 implementation.
@@ -33,7 +34,8 @@ AWS remains a possible later deployment target. M1 domain contracts must therefo
 
 ## Out Of Scope
 
-- Public Internet ingress, public DNS, router port forwarding, UPnP exposure, or public tunnels.
+- Public Internet ingress, Tailscale Funnel, public DNS, router port forwarding, UPnP exposure, or other public tunnels.
+- A second direct-LAN URL, private LAN CA, or unauthenticated LAN ingress.
 - Multi-node Kubernetes, high availability, zero-downtime maintenance, or automatic failover.
 - Local OpenAI, Claude, or other foundation-model inference.
 - AWS runtime resources or AWS data migration.
@@ -45,25 +47,25 @@ AWS remains a possible later deployment target. M1 domain contracts must therefo
 
 ```mermaid
 flowchart LR
-  U["Trusted LAN Browser"] --> I["LAN-only Kubernetes Ingress"]
+  U["Authorized Tailscale Browser"] -->|website, API, upload, download| TS["Tailscale Serve HTTPS"]
+  TS --> I["Loopback-only K3s Traefik"]
   I --> WB["Website Deployment"]
   I --> API["Backend API Deployment"]
   I --> OS["Private S3-compatible Object Store"]
   API --> DB["PostgreSQL StatefulSet"]
   API --> OS
-  U -->|short-lived upload| OS
   DB -->|queued Attempt| GW["Generation Worker Deployment"]
   GW --> OS
   GW --> DB
   GW -->|outbound HTTPS| P["OpenAI Image API"]
-  U -->|short-lived download| OS
 ```
 
 Phase 1 components are:
 
 | Component | Kubernetes shape | Responsibility |
 | --- | --- | --- |
-| LAN Ingress | Existing Ingress controller | Route the private LAN hostname to the website, API, and object-store data endpoint. |
+| Tailscale Serve | Host service, one persistent background configuration | Terminate tailnet HTTPS and proxy the canonical hostname to the loopback-only K3s ingress. |
+| K3s Traefik | Bundled controller with loopback-only `NodePort 30080` | Route website, `/v1` API, and path-style private-bucket requests without binding host ports 80 or 443. |
 | Website | `Deployment` + `Service`, one replica | Serve the static frontend and browser-safe runtime configuration. |
 | Backend API | `Deployment` + `Service`, one replica | Own customer APIs, metadata validation, object links, and queued Attempt creation. |
 | PostgreSQL | `StatefulSet` + `PersistentVolumeClaim`, one replica | Store the four normative tables; queued Attempt rows are the durable work queue. |
@@ -72,24 +74,28 @@ Phase 1 components are:
 
 All workloads run in one `ai-artist` namespace. Phase 1 assumes planned downtime during node, cluster, database, object-store, or application maintenance.
 
-## LAN Access Boundary
+## Tailscale Access Boundary
 
 The default Task route is:
 
 ```text
-https://ai-artist.home.arpa/tasks/{task_id}
+https://tongjin-server.tail910d5f.ts.net/tasks/{task_id}
 ```
 
 Deployment rules:
 
-- The Ingress address is reachable only from the trusted home subnet.
-- The host firewall allows application ingress only from the configured LAN CIDR.
-- The home router must not forward application ports from the Internet.
-- UPnP exposure, a public tunnel, and a public `LoadBalancer` address are prohibited in Phase 1.
-- Use a private LAN hostname. `ai-artist.home.arpa` is the documentation default; the actual hostname is a deployment parameter.
-- Private photos should use HTTPS. A private CA or locally trusted certificate may be used; public certificate automation is not required.
-- The object-store data endpoint used by presigned URLs must be reachable from LAN clients through the same private access boundary.
-- The object-store administration console remains cluster-internal and is not exposed through Ingress.
+- `tongjin-server.tail910d5f.ts.net` is the one canonical customer hostname for home and remote use.
+- Tailscale MagicDNS and HTTPS must be enabled. Tailscale Serve runs persistently in background mode and proxies HTTPS to `http://127.0.0.1:30080`.
+- The owner accepts that enabling tailnet HTTPS publishes the MagicDNS machine name in Certificate Transparency; it does not make the service publicly reachable.
+- Tailscale Funnel must remain disabled. The home router must not forward AI Artist ports, and K3s must not create a public or LAN `LoadBalancer` service.
+- K3s ServiceLB is disabled. The bundled Traefik Service is `NodePort 30080`, and K3s passes `nodeport-addresses=127.0.0.0/8` to kube-proxy so the NodePort is reachable only through loopback.
+- The fixed NodePort restriction assumes kube-proxy `iptables` mode; changing proxy mode requires an access-boundary revalidation.
+- Authorized clients must run Tailscale. A device with ordinary LAN access but no approved tailnet membership cannot use AI Artist.
+- Tailnet policy permits HTTPS access to this node only from approved owner devices. The application does not treat Tailscale identity headers as customer API credentials.
+- Tailscale Serve and Traefik must preserve the original hostname and path. Traefik routes `/v1` to the Backend API, `/ai-artist-private` to the MinIO S3 data endpoint, and all other customer paths to the Website.
+- The private bucket uses S3 path-style URLs so presigned upload/download requests use the same canonical hostname and pass through the same tailnet boundary.
+- The object-store administration console remains cluster-internal and has no Traefik route.
+- The existing Nextcloud snap keeps host port 80. AI Artist does not bind host port 80 and does not change the Nextcloud service.
 
 ## Metadata And Durable Attempt Queue
 
@@ -146,7 +152,7 @@ Rules:
 - The object store is not anonymously readable or listable.
 - Source uploads and artifacts live on a persistent volume outside container filesystems.
 - Presigned upload and download URLs default to a 15-minute TTL.
-- Presigned URLs use a LAN-reachable object-store endpoint and are never stored in PostgreSQL. Each Asset stores only the matching `upload_url_expires_at` timestamp.
+- Presigned URLs use the canonical Tailscale HTTPS endpoint and path-style bucket addressing; they are never stored in PostgreSQL. Each Asset stores only the matching `upload_url_expires_at` timestamp.
 - The Backend API verifies stored media type and size before marking an Asset `uploaded`.
 - Never issue customer download URLs for source photos.
 - Never return internal object keys through customer APIs.
@@ -175,13 +181,13 @@ The server requires outbound DNS and HTTPS access to the selected provider. No i
 Rules:
 
 - Phase 1 has no application-layer account, login, Task token, or `Authorization` header.
-- Any device admitted to the trusted home LAN can call the customer API and open a known Task route.
+- Any device permitted by the tailnet policy can call the customer API and open a known Task route.
 - `task_id` is a resource identifier, not an authorization credential.
 - Task, status, and download responses use `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 - M1 Task routes load no analytics pixels, tag managers, chat widgets, external fonts, or unnecessary third-party scripts.
 - Authentication and authorization must be designed before any public Internet or future AWS-facing exposure.
 
-The LAN boundary is an explicit Phase 1 simplification. It does not replace upload validation, private object storage, provider-secret handling, or log redaction.
+The Tailscale network boundary is an explicit Phase 1 simplification. It does not replace upload validation, private object storage, provider-secret handling, or log redaction. Application authentication and authorization remain required before any future public or non-tailnet exposure.
 
 ## Secrets And Workload Boundaries
 
@@ -204,7 +210,7 @@ Minimum workload access:
 | Backend API | Task metadata, upload/download URL creation, and queued Attempt creation. |
 | Generation Worker | Read Attempt inputs/source uploads, call the selected provider, write the current Attempt output, and update the current Attempt. |
 | PostgreSQL | Cluster-internal access from Backend API and Generation Worker only. |
-| Object store | Cluster-internal service plus LAN-only presigned data access; admin console remains internal. |
+| Object store | Cluster-internal service plus tailnet-only presigned data access through Traefik; admin console remains internal. |
 
 The Generation Worker must not issue customer download URLs or modify unrelated Tasks.
 
@@ -215,8 +221,9 @@ Browser-safe configuration:
 | Config | Purpose |
 | --- | --- |
 | AI_ARTIST_STAGE | Runtime stage, initially `home`. |
-| AI_ARTIST_API_BASE_URL | LAN-only Backend API URL. |
-| AI_ARTIST_ASSET_BASE_URL | LAN-only static style asset URL. |
+| AI_ARTIST_PUBLIC_BASE_URL | Fixed at `https://tongjin-server.tail910d5f.ts.net`. |
+| AI_ARTIST_API_BASE_URL | Fixed at `https://tongjin-server.tail910d5f.ts.net`; customer routes retain their `/v1` prefix. |
+| AI_ARTIST_ASSET_BASE_URL | Fixed at the canonical Tailscale HTTPS origin. |
 | AI_ARTIST_MAX_PHOTOS | Fixed at 5 for M1. |
 
 Backend and storage configuration:
@@ -225,8 +232,9 @@ Backend and storage configuration:
 | --- | --- |
 | AI_ARTIST_DATABASE_URL | PostgreSQL connection string supplied as a Secret. |
 | AI_ARTIST_OBJECT_ENDPOINT | Cluster-internal S3-compatible endpoint. |
-| AI_ARTIST_OBJECT_PRESIGN_ENDPOINT | LAN-reachable endpoint embedded in short-lived URLs. |
-| AI_ARTIST_PRIVATE_BUCKET | Private object-store bucket. |
+| AI_ARTIST_OBJECT_PRESIGN_ENDPOINT | Fixed at `https://tongjin-server.tail910d5f.ts.net`; presigned URLs use path-style bucket addressing. |
+| AI_ARTIST_OBJECT_ADDRESSING_STYLE | Fixed at `path`; virtual-hosted bucket addressing is not used. |
+| AI_ARTIST_PRIVATE_BUCKET | Fixed at `ai-artist-private`. |
 | AI_ARTIST_UPLOAD_URL_TTL_SECONDS | Fixed at 900 seconds by default. |
 | AI_ARTIST_DOWNLOAD_URL_TTL_SECONDS | Fixed at 900 seconds by default. |
 | AI_ARTIST_ATTEMPT_LEASE_SECONDS | Fixed at 600 seconds for M1. |
@@ -251,6 +259,7 @@ Keep only:
 - Backend API and Generation Worker container logs.
 - PostgreSQL queued/generating/failed Attempt counts and expired-lease queries.
 - Kubernetes Pod restart and readiness state.
+- `tailscale serve status` and a check that Tailscale Funnel is disabled.
 - Generation failure logs with `task_id`, `attempt_id`, safe failure category, and provider correlation ID when available.
 
 `kubectl logs`, Kubernetes events, and narrow database queries are sufficient for Phase 1. Prometheus, Grafana, Loki, tracing, and external alerting are deferred.
@@ -258,6 +267,22 @@ Keep only:
 ## Persistence, Backup, And Retention
 
 Phase 1 has no HA. PostgreSQL and object storage use one replica and `ReadWriteOnce` persistent volumes on the home server. The server and its primary disks remain a single failure domain.
+
+The finalized server and storage profile is:
+
+| Surface | Phase 1 value |
+| --- | --- |
+| Host | `tongjin-server`, Ubuntu 24.04.4 LTS, `x86_64` |
+| Capacity | 8 logical CPUs and 15 GiB RAM |
+| K3s system storage | Existing NVMe root filesystem under the K3s default data path |
+| Application StorageClass path | `/data/ai-artist/k3s-storage` on the 1 TB SSD |
+| PostgreSQL PVC request | 20 GiB, one replica |
+| MinIO PVC request | 500 GiB, one replica; local-path capacity is monitored at filesystem level |
+| Backup target | `/backup/ai-artist` on the separate 2 TB HDD |
+| LAN identity | Current address `192.168.4.26`; router DHCP reservation is required before deployment. Wi-Fi is accepted for M1, while wired Ethernet remains recommended. |
+| Tailnet identity | `tongjin-server.tail910d5f.ts.net`, currently `100.90.10.70` |
+
+Phase 1 application images are built on the x86_64 server from a named Git commit with the existing Docker installation, exported as image archives, and imported into K3s containerd. Deployments use immutable commit-derived tags with `imagePullPolicy: IfNotPresent`. A private registry and automated release pipeline are deferred.
 
 Before using irreplaceable household photos:
 
@@ -284,8 +309,11 @@ Kubernetes resource names, PostgreSQL row IDs, MinIO-specific APIs, AWS ARNs, SQ
 
 ## Acceptance Checks
 
-- The website and APIs are reachable from the trusted home LAN and are not reachable through the home router's public interface.
-- No public tunnel, public DNS dependency, or Internet-facing load balancer is required.
+- The website, `/v1` API, and path-style presigned upload/download URLs work through `https://tongjin-server.tail910d5f.ts.net` from an authorized tailnet device.
+- A LAN-only device without approved Tailscale access cannot reach the application.
+- Tailscale Serve is persistent, Tailscale Funnel is disabled, and no router port forwarding or Internet-facing load balancer is required.
+- K3s ServiceLB is disabled; Traefik `NodePort 30080` is reachable through loopback but not through the LAN or Tailscale node address.
+- Existing Nextcloud access on host port 80 remains unchanged.
 - Website, Backend API, Generation Worker, PostgreSQL, and object storage run on a single Kubernetes node with one replica each.
 - PostgreSQL atomically persists each queued Attempt and updates `tasks.current_attempt_id`; no generation-job table exists.
 - Each Attempt receives at most one claim and one provider call.
@@ -293,7 +321,7 @@ Kubernetes resource names, PostgreSQL row IDs, MinIO-specific APIs, AWS ARNs, SQ
 - Lease expiry marks the Attempt failed without requeue, and conditional finalization rejects late Worker responses.
 - Failed Attempts remain inspectable with no automatic cleanup.
 - Private object storage uses persistent storage and does not allow anonymous reads or listing.
-- Upload/download URLs are short-lived and use a LAN-reachable object-store endpoint.
+- Upload/download URLs are short-lived, use the canonical Tailscale hostname, and pass a real presigned POST/GET end-to-end check through Tailscale Serve and Traefik.
 - `OPENAI_API_KEY` exists only in a server-side Secret available to the Generation Worker and never reaches the browser or repository.
 - AI generation uses outbound provider APIs; no foundation model runs on the home server.
 - The UI or operator documentation makes the external-provider data boundary clear before non-fixture use.
@@ -303,4 +331,11 @@ Kubernetes resource names, PostgreSQL row IDs, MinIO-specific APIs, AWS ARNs, SQ
 
 ## Deployment Parameters
 
-The Kubernetes distribution, LAN hostname and certificate, LAN CIDR, StorageClass, persistent-volume sizes, backup target, and OpenAI account credential are deployment parameters. The M1 provider/model request contract is fixed by LLD-03 and is not a free deployment choice.
+The Kubernetes distribution, access hostname, access proxy, storage paths, initial PVC requests, backup target, and local image-delivery method are fixed above. The implementation pins an exact supported K3s patch version and immutable application-image tags when the scaffold is created. Secret values, including the OpenAI account credential and database/object-store passwords, remain deployment inputs and never enter the repository. The M1 provider/model request contract is fixed by LLD-03 and is not a free deployment choice.
+
+Official references used to freeze this profile:
+
+- [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve)
+- [Tailscale HTTPS certificates](https://tailscale.com/docs/how-to/set-up-https-certificates)
+- [Kubernetes NodePort address restriction](https://kubernetes.io/docs/concepts/services-networking/service/#custom-ip-address-configuration-for-type-nodeport-services)
+- [K3s local image import](https://docs.k3s.io/add-ons/import-images)

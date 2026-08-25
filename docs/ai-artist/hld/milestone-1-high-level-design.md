@@ -8,13 +8,13 @@
 | Owner | Codex |
 | Product milestone | M1: `Memory Product Pack Agent` |
 | Primary source | Product direction only; the reconciled LLDs are authoritative for implementation contracts |
-| Current design direction | LAN-only home Kubernetes postcard generation with external AI APIs |
+| Current design direction | Tailnet-only home K3s postcard generation with external AI APIs |
 
 ## 1. Executive Summary
 
 M1 is a narrow website-first workflow. A user creates a `Task`, uploads 1 to 5 photos, and provides a title, note, and style. The system creates one or more immutable generation `Attempt`s, each with a complete input snapshot. Attempt 1 has no refinement note; every later Attempt requires one. Each successful Attempt produces exactly one `1800x1200` postcard PNG.
 
-M1 proves the intake -> upload -> asynchronous generation -> status -> download loop on a home Linux server running a single-node Kubernetes cluster. It is accessible only from the trusted home LAN. AI inference runs through the OpenAI Image API; the home server does not host a model. M1 intentionally does not implement a product pack, rights workflow, automated QA gate, packaging, accounts, payments, marketplace publishing, POD, NFT, email delivery, public Internet access, or high availability.
+M1 proves the intake -> upload -> asynchronous generation -> status -> download loop on a home Linux server running a single-node K3s cluster. It is accessible only to approved devices in the owner's Tailscale tailnet through one canonical HTTPS hostname. AI inference runs through the OpenAI Image API; the home server does not host a model. M1 intentionally does not implement a product pack, rights workflow, automated QA gate, packaging, accounts, payments, marketplace publishing, POD, NFT, email delivery, public Internet access, or high availability.
 
 Implementation details and field-level contracts are owned by [LLD-00](../lld/milestone-1-lld-00-implementation-foundation.md), [LLD-01](../lld/milestone-1-lld-01-website-intake-status-delivery.md), [LLD-02](../lld/milestone-1-lld-02-backend-api-lifecycle.md), [LLD-03](../lld/milestone-1-lld-03-generation-worker.md), and [LLD-05](../lld/milestone-1-lld-05-runtime-security-ops.md). [LLD-04](../lld/milestone-1-lld-04-qa-packaging-delivery.md) is deferred.
 
@@ -31,10 +31,10 @@ Implementation details and field-level contracts are owned by [LLD-00](../lld/mi
 | Output | One `1800x1200` `image/png` postcard per successful Attempt |
 | Application stack | Next.js, React, and TypeScript frontend; Python FastAPI backend and Python Worker |
 | Provider | OpenAI Image API with `gpt-image-2-2026-04-21`; deterministic fake provider for tests |
-| Runtime | Single-node Kubernetes on a home Linux server |
-| Network exposure | Trusted home LAN only; no public ingress or router port forwarding |
+| Runtime | Single-node K3s on the approved home Linux server |
+| Network exposure | Authorized Tailscale tailnet only through persistent Serve; no Funnel, public ingress, or router port forwarding |
 | Async delivery | Queued Attempt rows in PostgreSQL; one claim and no automatic retry per Attempt |
-| Customer access | Trusted home LAN; no application login or Task token in Phase 1 |
+| Customer access | Approved tailnet devices; no application login or Task token in Phase 1 |
 | Data cleanup | No application-data cleanup, archive, or complex recovery in M1 |
 | Attempt retention | No automatic cleanup |
 | Availability | Single-node, best-effort; no HA requirement |
@@ -60,7 +60,7 @@ Implementation details and field-level contracts are owned by [LLD-00](../lld/mi
 - Email delivery, marketplace publishing, Etsy, Shopify, POD, NFT, or fulfillment.
 - Public galleries or a general-purpose image-generation playground.
 - Application-data cleanup, archive tiers, or complex recovery workflows.
-- Public DNS, public ingress, Internet-facing access, multi-node Kubernetes, or high availability.
+- Public DNS, Tailscale Funnel, public ingress, Internet-facing access, direct non-tailnet LAN access, multi-node Kubernetes, or high availability.
 - Running OpenAI, Claude, or another foundation model on the home server.
 
 ## 4. User Experience
@@ -91,25 +91,24 @@ Attempt status:
 
 ```mermaid
 flowchart LR
-  U[LAN Customer Browser] --> I[LAN-only Kubernetes Ingress]
+  U[Authorized Tailscale Browser] -->|website, API, upload, download| TS[Tailscale Serve HTTPS]
+  TS --> I[Loopback-only K3s Traefik]
   I --> W[Website Deployment]
   I --> API[Backend API Deployment]
   I --> O[Private S3-compatible Object Store]
   API --> DB[PostgreSQL]
   API --> O
-  U -->|short-lived upload| O
   DB --> GW[Generation Worker Deployment]
   GW --> P[OpenAI Image API]
   GW --> O
   GW --> DB
-  U -->|short-lived download| O
 ```
 
 Runtime responsibilities:
 
 | Component | Responsibility |
 | --- | --- |
-| LAN-only Ingress + Website Deployment | Serve the website only to trusted home-network clients. |
+| Tailscale Serve + loopback-only Traefik + Website Deployment | Serve the website only to approved tailnet clients without exposing Kubernetes ingress ports on the host network. |
 | Backend API Deployment | Create Tasks, issue upload/download links, validate input, create queued Attempts, and return status. |
 | PostgreSQL | Store the four normative tables; Attempt rows also provide the durable queue. |
 | Private S3-compatible object store | Store source uploads and postcard artifacts on persistent storage. |
@@ -154,11 +153,11 @@ Storage references remain internal. Customer APIs expose artifact metadata and, 
 
 ## 8. Security And Runtime Constraints
 
-- The Kubernetes Ingress, website, API, and object-store upload/download endpoints are reachable only from the trusted home LAN.
-- The router must not expose the application through port forwarding, UPnP, a public tunnel, or a public load balancer in Phase 1.
+- The website, API, and object-store upload/download endpoints are reachable only through `https://tongjin-server.tail910d5f.ts.net` from devices permitted by the tailnet policy.
+- Tailscale Serve terminates HTTPS and proxies to loopback-only K3s Traefik; Tailscale Funnel, router port forwarding, UPnP, other public tunnels, and public load balancers are prohibited in Phase 1.
 - Private object storage is not anonymously readable and uses persistent storage with host-level access restricted to the runtime administrator.
 - The browser never chooses object keys.
-- Phase 1 has no application-layer account, login, or Task-token authentication. Any device admitted to the trusted home LAN can call the customer API.
+- Phase 1 has no application-layer account, login, or Task-token authentication. Any device permitted by the tailnet policy can call the customer API.
 - `task_id` is a resource identifier, not an authorization credential. Authentication and authorization must be added before any future public exposure.
 - Uploads accept only JPEG/PNG, up to 20 MB per photo and 5 photos per Task.
 - Upload and download URLs have a default TTL of 15 minutes.
@@ -180,7 +179,7 @@ The reconciled LLD set is the implementation source of truth:
 
 1. LLD-00: Next.js/React/TypeScript frontend and Python backend foundation.
 2. LLD-02: Task/Asset/Attempt persistence and customer APIs.
-3. LLD-05: LAN-only home Kubernetes runtime, PostgreSQL, private object storage, single-delivery Attempt claiming, secrets, and security.
+3. LLD-05: tailnet-only home K3s runtime, PostgreSQL, private object storage, single-delivery Attempt claiming, secrets, and security.
 4. LLD-01: website intake, upload, status, refinement, and download UX.
 5. LLD-03: OpenAI generation, deterministic fake-provider tests, normalization, and minimum verification.
 6. End-to-end verification for one-photo, five-photo, refinement, terminal failure, and artifact download flows.

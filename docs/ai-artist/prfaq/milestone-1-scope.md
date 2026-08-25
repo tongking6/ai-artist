@@ -105,7 +105,7 @@ A non-technical user can complete the guided UI, submit photos and rights confir
 
 ### Why include a user UI in M1 if the runtime is private and local?
 
-Because the target user is not an engineer. The UI is the Phase 1 product experience even though the Kubernetes runtime is reachable only on the home LAN. Deterministic fixtures and the fake provider keep generation repeatable and cheap to debug before any public SaaS deployment exists.
+Because the target user is not an engineer. The UI is the Phase 1 product experience even though the home K3s runtime is reachable only through the owner's approved Tailscale tailnet. Deterministic fixtures and the fake provider keep generation repeatable and cheap to debug before any public SaaS deployment exists.
 
 ### What is in scope?
 

@@ -7,7 +7,7 @@
 | LLD | LLD-01 |
 | Product milestone | M1: `Memory Product Pack Agent` |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Implementation-ready draft |
+| Status | Implementation-ready; UX and access contracts finalized |
 | Scope owner | Customer website intake, upload UX, status UX, refinement UX, and artifact delivery |
 
 ## Purpose
@@ -18,7 +18,7 @@ The website is not a marketplace, account portal, operator dashboard, or generic
 
 ## In Scope
 
-- LAN-accessible product-start page.
+- Tailnet-accessible product-start page.
 - Draft task creation before upload.
 - Guided intake for 1 to 5 photos.
 - Upload UI using backend-issued upload slots.
@@ -152,22 +152,22 @@ Rules:
 - Refresh expired download links through the artifact download API.
 - Do not place raw presigned URLs in copy, logs, or emails.
 
-## Phase 1 LAN Access UX
+## Phase 1 Tailscale Access UX
 
-Phase 1 relies on the trusted home LAN and has no application-layer login or Task token.
+Phase 1 relies on approved Tailscale tailnet access and has no application-layer login or Task token. Home and remote clients use the same canonical URL.
 
 The Task route is:
 
 ```text
-https://ai-artist.home.arpa/tasks/{task_id}
+https://tongjin-server.tail910d5f.ts.net/tasks/{task_id}
 ```
 
 Rules:
 
 - The frontend does not implement login, token storage, or an `Authorization` header.
-- Any trusted LAN device with a Task URL can open that Task.
+- Any device permitted by the tailnet policy with a Task URL can open that Task.
 - `task_id` is a resource identifier, not an authorization credential.
-- Public exposure is prohibited until authentication and authorization are designed.
+- Tailscale Funnel and other public exposure are prohibited until authentication and authorization are designed.
 
 ## Customer-Safe Copy Rules
 
@@ -187,7 +187,7 @@ LLD-01 depends on:
 
 - LLD-02 for task creation, upload slots, input validation, task status, attempt creation, status metadata, attempt history, and artifact download links.
 - LLD-03 for artifact generation and readiness metadata.
-- LLD-05 for the LAN access boundary, browser-safe runtime config, no-store/cache/referrer policy requirements, and private storage.
+- LLD-05 for the Tailscale access boundary, browser-safe runtime config, no-store/cache/referrer policy requirements, and private storage.
 
 LLD-01 provides:
 
@@ -203,13 +203,13 @@ LLD-01 provides:
 - Initial generation sends `{}` to `POST /v1/tasks/{task_id}/attempts` and creates Attempt 1.
 - A refinement uses the same endpoint, submits only `refinement_note`, and creates a later Attempt only when no Attempt is queued or generating.
 - The UI does not expose internal artifacts or private storage details.
-- Phase 1 frontend sends no application authentication token and remains LAN-only.
+- Phase 1 frontend sends no application authentication token and remains tailnet-only.
 - Status screens distinguish task status from attempt status.
 - Attempt history is viewable and previous ready artifacts remain downloadable.
 - Delivery uses a fresh short-lived artifact download URL.
-- The website and its upload/download endpoints require the trusted home LAN and do not depend on public Internet ingress.
+- The website and its upload/download endpoints require approved tailnet access through the canonical Tailscale HTTPS origin and do not depend on public Internet ingress.
 - The UI does not introduce accounts, payment, marketplace publishing, POD, NFT, public gallery, rights workflow, or operator review.
 
 ## Open Questions
 
-None. The private LAN hostname, certificate, and route structure are deployment parameters. Public Internet routing is deferred.
+None. LLD-05 fixes the canonical Tailscale hostname and route structure. Public Internet routing is deferred.
