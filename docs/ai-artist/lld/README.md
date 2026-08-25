@@ -76,7 +76,7 @@ tasks/{task_id}/
 - LLD-02 creates a queued Attempt and atomically updates `tasks.current_attempt_id`; PostgreSQL contains exactly four application tables.
 - Initial generation and later refinement both use `POST /v1/tasks/{task_id}/attempts`; only the request body and existing Attempt history distinguish them.
 - LLD-03 claims the oldest queued Attempt directly with lease fencing.
-- LLD-03 directly updates Attempt status.
+- LLD-03 directly updates Attempt status and advances the owning `tasks.updated_at` for Task-center ordering.
 - LLD-03 generates exactly one `1800x1200` PNG.
 - LLD-03 performs minimum verification before setting `ready`.
 - LLD-03 makes at most one OpenAI Image API call per Attempt using `gpt-image-2-2026-04-21`; the fake provider remains available for deterministic tests.
@@ -93,7 +93,13 @@ Phase 1 canonical Task link:
 https://tongjin-server.tail910d5f.ts.net/tasks/{task_id}
 ```
 
-Phase 1 has no application-layer login or Task token. Approved Tailscale tailnet membership and policy are the access boundary; home and remote clients use the same URL. Tailscale Funnel is disabled. Authentication and authorization must be designed before public or AWS-facing exposure.
+Phase 1 system Task center:
+
+```text
+https://tongjin-server.tail910d5f.ts.net/tasks
+```
+
+Phase 1 has no application-layer login or Task token. Approved Tailscale tailnet membership and policy are the access boundary; home and remote clients use the same URL. Every approved device can list all Task summaries, so this remains a trusted single-household studio. Tailscale Funnel is disabled. Authentication and authorization must be designed before public or AWS-facing exposure.
 
 M1 upload limits are `image/jpeg` or `image/png`, up to 20 MB per photo and 5 photos per Task.
 
