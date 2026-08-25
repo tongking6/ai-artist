@@ -1,181 +1,111 @@
-# AI Artist M1 LLD-05: AWS Runtime, Privacy/Security, Observability, Retention, and Demo Verification Fixtures
+# AI Artist M1 LLD-05: AWS Runtime, Storage, Security, and Retention
 
 ## Document Control
 
 | Field | Value |
 | --- | --- |
 | LLD | LLD-05 |
-| Product milestone | M1: `Memory Product Pack Agent` |
+| Product milestone | M1: Memory Product Pack Agent |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Reviewer reconfirmed signoff |
-| Scope owner | AWS runtime, storage prefix authority, privacy/security, observability, retention, and demo verification |
+| Status | Implementation-ready draft |
+| Scope owner | AWS runtime, private storage, `Task`-link security, SQS generation delivery, and retention |
 
 ## Purpose
 
-LLD-05 defines the M1 runtime and operational foundation for the website-integrated automated generation flow.
-
-LLD-05 is the authority for the runtime S3 prefix contract.
+LLD-05 defines the minimum AWS runtime and security posture for the M1 `Task` -> `Attempt` -> postcard artifact workflow.
 
 ## In Scope
 
-- AWS service topology.
-- Runtime configuration.
-- Private storage model.
-- Canonical S3 prefix contract.
-- Request-link privacy/security posture.
-- Presigned upload and download constraints.
+- CloudFront and S3 website hosting.
+- API Gateway and Lambda customer APIs.
+- DynamoDB `Task` and `Attempt` metadata.
+- Private S3 artifact storage.
+- SQS generation queue and dead-letter queue.
+- Presigned upload/download constraints.
 - IAM boundaries.
-- Encryption.
-- Structured logs, metrics, alarms, and dashboards.
-- Retention and cleanup policy.
-- Demo fixtures and verification plan.
+- Basic CloudWatch logging.
+- SQS DLQ retention for failed generation commands.
 
 ## Out Of Scope
 
-- Website UX details.
-- Field-level request schema.
-- Full `project.json` ownership.
-- Generation provider implementation.
-- QA gate implementation details.
-- ZIP packaging internals.
-- Marketplace, payment, POD, NFT, public gallery, account system, or operator review.
+- SES, WAF, Cognito, accounts, and Step Functions.
+- ZIP packaging, PDF output, multi-artifact delivery, and automated visual QA.
+- Marketplace, payment, POD, NFT, rights, and operator workflows.
+- Complex dashboards, tracing, or alarm taxonomy.
 
 ## Runtime Topology
 
 ```mermaid
 flowchart LR
   U["Customer Browser"] --> CF["CloudFront"]
-  CF --> WB["Private S3 Website Bucket"]
-
+  CF --> WB["Public Website S3 Bucket"]
   U --> API["API Gateway"]
-  API --> BL["Backend API Lambdas"]
-  BL --> DDB["DynamoDB Request Table"]
-  BL --> PB["Private S3 Artifact Bucket"]
-
+  API --> BL["Backend API Lambda"]
+  BL --> DB["DynamoDB `Task` Table"]
+  BL --> PB["Private Artifact S3 Bucket"]
   U -->|presigned upload| PB
-  U -->|short-lived presigned download| PB
-
-  BL -->|StartGenerationCommand| GW["Generation Lambda"]
+  BL -->|StartGenerationCommand| Q["SQS Generation Queue"]
+  Q --> GW["Generation Lambda"]
   GW --> PB
-  GW --> DDB
-
-  GW -->|GenerationCompleted| QA["QA + Packaging Lambda"]
-  QA --> PB
-  QA --> DDB
-
-  BL -->|optional status email| SES["SES"]
-  BL --> CW["CloudWatch"]
-  GW --> CW
-  QA --> CW
+  GW --> DB
+  Q --> DLQ["SQS Dead-Letter Queue"]
+  U -->|short-lived presigned download| PB
 ```
 
-M1 baseline:
+M1 services are CloudFront/S3, API Gateway/Lambda, DynamoDB, private S3, SQS, Generation Lambda, SQS DLQ, and basic CloudWatch logs.
 
-- `CloudFront + S3` for the static website.
-- `API Gateway + Lambda` for customer-facing APIs.
-- `DynamoDB` for request metadata.
-- Private S3 bucket for source uploads, generated artifacts, internal artifacts, QA reports, package manifest, and final ZIP.
-- Lambda async invocation initially for generation and QA/package handoffs.
-- `SQS` if queue backpressure or visibility timeout control is needed.
-- `Step Functions` if multi-step resumability or long-running coordination is needed.
-- Optional `SES` for status-link emails only.
-- `CloudWatch` for logs, metrics, alarms, and operational traces.
+## Storage Layout
 
-## Canonical Prefix Authority
-
-LLD-05 owns the M1 runtime S3 prefix contract.
-
-Canonical attempt prefix:
+LLD-05 owns:
 
 ```text
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/
-```
-
-Only these child directories are canonical:
-
-```text
-customer/
-internal/
-qa/
-package/
-```
-
-Required canonical artifact paths:
-
-```text
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/customer/sticker_sheet.png
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/customer/sticker_sheet.pdf
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/customer/postcard.png
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/customer/postcard.pdf
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/customer/poster.png
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/customer/poster.pdf
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/customer/social_preview.png
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/internal/generation_manifest.json
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/internal/prompt_log.json
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/internal/generation_notes.md
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/internal/style_recipe.json
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/internal/layout_plan.json
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/qa/quality_report.json
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/package/manifest.json
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/package/final_download_pack.zip
-```
-
-Broader private request layout:
-
-```text
-requests/{request_id}/
+tasks/{task_id}/
   uploads/
     {asset_id}.{normalized_ext}
-  project/
-    project_v{generation_version}.json
-    rights_checklist.json
-  generations/
-    v{generation_version}/
-      attempts/
-        {attempt_id}/
-          customer/
-          internal/
-          qa/
-          package/
+  attempts/
+    {attempt_id}/
+      input.json
+      postcard.png
 ```
 
-The following are incompatible with M1:
+Rules:
 
-```text
-requests/{request_id}/generated/attempt-{attempt_id}/...
-requests/{request_id}/qa/attempt-{attempt_id}/...
-requests/{request_id}/deliverables/attempt-{attempt_id}/...
-```
+- `input.json` is the immutable `Attempt` input snapshot.
+- `postcard.png` is the only M1 customer artifact.
+- The browser never chooses object keys.
+- No generation_version path component is used.
+- No customer/, internal/, qa/, or package/ directories are required.
+- No ZIP, manifest, quality report, PDF, or prompt log is required.
 
-## Attempt Freshness
-
-`latest_eligible_attempt_id` is the runtime freshness authority for QA, packaging, delivery, cleanup decisions, logs, metrics, and stale-attempt rejection.
-
-QA/package must reject work unless:
-
-```text
-request.latest_eligible_attempt_id == event.attempt_id
-request.generation_version == event.generation_version
-```
-
-Stale callbacks must:
-
-- Not package.
-- Not write delivery metadata.
-- Not issue customer download links.
-- Emit stale-attempt metrics.
-- Leave private stale artifacts for retention cleanup.
-
-## Storage Privacy
-
-Use separate logical storage surfaces:
+Use separate logical buckets:
 
 | Bucket | Exposure | Contents |
 | --- | --- | --- |
-| Website bucket | CloudFront OAC only | Static frontend bundle and public demo-safe assets. |
-| Private artifact bucket | No public access | Uploads, `project.json`, generated artifacts, internal artifacts, QA reports, package manifests, and final ZIPs. |
+| Website bucket | CloudFront read only | Frontend bundle and approved public demo/style assets |
+| Private artifact bucket | No public access | Source uploads, input snapshots, and postcard artifacts |
 
-All buckets require:
+## SQS Generation Delivery
+
+1. LLD-02 writes the `Attempt` with status queued.
+2. LLD-02 sends one StartGenerationCommand to SQS.
+3. Generation Lambda receives the message.
+4. LLD-03 conditionally updates queued -> generating.
+5. LLD-03 generates, verifies, writes the artifact, and updates the `Attempt` to ready or failed.
+
+SQS rules:
+
+- Messages include task_id, attempt_id, input_snapshot_ref, source_asset_ids, output_prefix, and idempotency_key.
+- Visibility timeout exceeds the expected maximum generation duration.
+- M1 visibility timeout is 10 minutes.
+- Generation Lambda timeout is 9 minutes, and the provider call timeout is 8 minutes.
+- Redelivery is safe and must not create duplicate artifacts.
+- Failed messages go to the DLQ after 3 receives.
+- DLQ messages are retained for 14 days.
+- M1 does not use a second QA/package queue.
+
+## Storage Privacy And Encryption
+
+Both buckets require:
 
 - S3 Block Public Access.
 - ACLs disabled.
@@ -184,245 +114,128 @@ All buckets require:
 - No public object ACLs.
 - No public website hosting for private artifacts.
 
-## Request-Link Security
+M1 may use SSE-S3 by default. SSE-KMS is deferred.
 
-M1 uses request links as bearer access credentials.
+## `Task`-Link Security
 
-Approved link:
-
-```text
-https://app.example.com/request/{request_id}#access_token={request_access_token}
-```
-
-Approved API transport:
-
-```http
-Authorization: Bearer <request_access_token>
-```
-
-Prohibited:
-
-- Token in query string.
-- Token in URL path.
-- Token in cookies.
-- Token in `localStorage`.
-- Token in analytics.
-- Token in logs.
-
-Frontend storage:
-
-- Prefer memory.
-- `sessionStorage` is acceptable only for page refresh.
-- `localStorage` is prohibited.
-
-API responses for request/status/delivery must use:
+`Task` link:
 
 ```text
-Cache-Control: no-store
-Referrer-Policy: no-referrer
+https://app.example.com/task/{task_id}#access_token={task_access_token}
 ```
 
-Request/status/delivery routes must not load analytics pixels, tag managers, chat widgets, external fonts, or third-party scripts in M1.
+API transport:
+
+```text
+Authorization: Bearer <task_access_token>
+```
+
+Rules:
+
+- Store only a `Task` token hash or HMAC.
+- Never accept tokens in query strings, URL paths, cookies, or request bodies.
+- Never put tokens in logs, analytics, or localStorage.
+- Prefer memory; sessionStorage is allowed only for page refresh.
+- task_id alone grants no access.
+- The token authorizes only the associated `Task`.
+- The token is valid for 30 days from Task creation.
+- Lost links require a new `Task` in M1.
+- `Task`/status/download responses use Cache-Control: no-store and Referrer-Policy: no-referrer.
+- M1 task routes load no analytics pixels, tag managers, chat widgets, external fonts, or third-party scripts.
 
 ## Presigned Uploads
 
+1. Browser authenticates with the `Task` token.
+2. Backend creates a server-owned key under tasks/{task_id}/uploads/.
+3. Backend returns a short-lived presigned POST.
+4. Browser uploads to the private artifact bucket.
+5. Browser calls the asset-complete API.
+6. Backend verifies the object with S3 metadata before marking the Asset uploaded.
+
 Rules:
 
-- Backend creates server-owned upload keys.
-- Browser uploads directly to private S3.
-- Use presigned POST where possible.
+- Presigned POST preferred.
 - Default TTL: 15 minutes.
-- CORS limited to approved website origins.
-- One upload URL per asset.
-- Keys stay under the LLD-02/05-owned request upload area.
-- Upload metadata must not include raw email, private notes, or unnecessary PII.
+- Content type and maximum bytes are constrained by policy.
+- CORS allows only approved website origins.
+- Upload metadata contains no unnecessary PII or raw notes.
 
 ## Presigned Downloads
 
-Download flow:
-
-1. Website calls status/download API with request token in `Authorization`.
-2. Backend verifies delivered state and latest eligible delivered attempt.
-3. Backend issues a short-lived download URL for:
-
-```text
-requests/{request_id}/generations/v{generation_version}/attempts/{attempt_id}/package/final_download_pack.zip
-```
+1. Browser calls the artifact download API with the `Task` token.
+2. Backend verifies `Task` and Artifact ownership.
+3. Backend verifies `Attempt` status is ready.
+4. Backend returns a short-lived presigned GET URL for `postcard.png`.
 
 Rules:
 
 - Default TTL: 15 minutes.
-- Do not email raw presigned download URLs.
-- Do not issue customer download URLs for source photos or internal artifacts.
-- Expired links are refreshed through the API.
+- Never issue URLs for source photos or `input.json`.
+- Never return S3 keys through customer APIs.
+- Download URLs are not stored in DynamoDB.
 
 ## IAM Boundaries
 
 | Principal | Allowed access |
 | --- | --- |
-| CloudFront OAC | Read website bucket only. |
-| Backend API Lambda | Request table access, upload/download URL creation, `project.json`, attempt metadata, generation trigger. |
-| Generation Lambda | Read `project.json` and source uploads; write only `customer/` and `internal/` for its attempt. |
-| QA/Packaging Lambda | Read generation artifacts; write only `qa/` and `package/` for its attempt. |
-| Optional SES sender | Send approved status-link emails only. |
-| Cleanup process | Delete or expire objects based on request/attempt retention policy. |
+| CloudFront OAC | Read website bucket only |
+| Backend API Lambda | `Task` metadata, upload/download URL creation, and SQS send |
+| Generation Lambda | Read `Task` inputs/source uploads, write current `Attempt` output, update current `Attempt` |
+| SQS | Deliver generation commands |
 
-Provider secrets are readable only by the generation worker.
+Generation Lambda must not issue customer download URLs or modify unrelated `Task`s.
 
 ## Configuration
 
-Frontend-safe config:
+Frontend-safe: AI_ARTIST_STAGE, AI_ARTIST_API_BASE_URL, AI_ARTIST_MAX_PHOTOS, AI_ARTIST_PUBLIC_ASSET_BASE_URL.
+
+Backend:
 
 | Config | Purpose |
 | --- | --- |
-| `AI_ARTIST_STAGE` | Display/environment routing. |
-| `AI_ARTIST_API_BASE_URL` | Backend API base URL. |
-| `AI_ARTIST_MAX_PHOTOS` | UI validation mirror. |
-| `AI_ARTIST_PUBLIC_ASSET_BASE_URL` | Public demo/style assets. |
+| AI_ARTIST_PRIVATE_BUCKET | Private artifact bucket |
+| AI_ARTIST_TASK_TABLE | DynamoDB `Task` table |
+| AI_ARTIST_GENERATION_QUEUE_URL | SQS generation queue |
+| AI_ARTIST_GENERATION_DLQ_URL | SQS dead-letter queue |
+| AI_ARTIST_UPLOAD_URL_TTL_SECONDS | Upload URL TTL |
+| AI_ARTIST_DOWNLOAD_URL_TTL_SECONDS | Download URL TTL |
+| AI_ARTIST_TASK_TOKEN_TTL_SECONDS | Fixed at 2592000 seconds (30 days) |
+| AI_ARTIST_GENERATION_LAMBDA_TIMEOUT_SECONDS | Fixed at 540 seconds (9 minutes) |
+| AI_ARTIST_PROVIDER_TIMEOUT_SECONDS | Fixed at 480 seconds (8 minutes) |
+| AI_ARTIST_GENERATION_MODE | `fake` for M1; real provider is deferred |
+| LOG_LEVEL | Basic log verbosity |
 
-Backend config:
+Secrets live in environment variables or AWS Secrets Manager.
 
-| Config | Purpose |
-| --- | --- |
-| `AI_ARTIST_PRIVATE_BUCKET` | Private artifact bucket. |
-| `AI_ARTIST_REQUEST_TABLE` | DynamoDB table. |
-| `AI_ARTIST_UPLOAD_URL_TTL_SECONDS` | Upload URL TTL. |
-| `AI_ARTIST_DOWNLOAD_URL_TTL_SECONDS` | Download URL TTL. |
-| `AI_ARTIST_GENERATION_MODE` | `fake` or `provider`. |
-| `AI_ARTIST_CANONICAL_PREFIX_VERSION` | Recommended `m1.attempt_prefix.v1`. |
-| `AI_ARTIST_RETENTION_PROFILE` | `local`, `dev`, `demo`, or `prod`. |
-| `AI_ARTIST_SES_ENABLED` | Enables optional email notifications. |
-| `LOG_LEVEL` | Structured log verbosity. |
+## Minimum Observability
 
-Secrets must live in environment variables or AWS Secrets Manager, never frontend code, S3 artifacts, logs, or committed files.
+Keep only:
 
-## Observability
+- CloudWatch Lambda logs.
+- API Gateway 5xx logs.
+- Lambda error/throttle logs.
+- SQS receive count and DLQ messages.
+- Generation failure logs with task_id and attempt_id.
 
-Structured logs should include safe fields:
-
-- `request_id`
-- `generation_version`
-- `attempt_id`
-- `latest_eligible_attempt_id`
-- `canonical_prefix_version`
-- `component`
-- `status_from`
-- `status_to`
-- `reason_code`
-- `failure_category`
-- `duration_ms`
-- `trace_id`
-
-Logs must not include:
-
-- Raw uploaded photos.
-- Signed URLs.
-- Request access tokens.
-- API keys or secrets.
-- Raw customer email.
-- Raw private notes where avoidable.
-- Full rendered prompts containing customer-sensitive text.
-
-Minimum metrics:
-
-- `RequestCreatedCount`
-- `AttemptCreatedCount`
-- `GenerationStartedCount`
-- `GenerationSucceededCount`
-- `GenerationFailedCount`
-- `QaStartedCount`
-- `QaPassedCount`
-- `QaFailedCount`
-- `PackagingSucceededCount`
-- `PackagingFailedCount`
-- `DeliveryReadyCount`
-- `DownloadLinkCreatedCount`
-- `DownloadLinkFailedCount`
-- `StaleAttemptCallbackCount`
-- `CanonicalPrefixViolationCount`
-- `RetentionCleanupFailedCount`
-
-Minimum demo alarms:
-
-- API Gateway 5xx.
-- Lambda errors and throttles.
-- Generation failures.
-- QA/package failures.
-- Requests stuck in `generating`, `qa_checking`, or `packaging`.
-- Any stale attempt callback.
-- Any canonical prefix violation.
-- Download-link creation failures.
-- DynamoDB throttling.
-- Retention cleanup failures.
+Logs must not include tokens, signed URLs, secrets, raw photos, or unnecessary private notes. No dashboards or complex metrics taxonomy are required.
 
 ## Retention
 
-Recommended M1 defaults:
-
-| Data class | Default |
-| --- | --- |
-| Unsubmitted uploads | Delete after 24 hours. |
-| Source uploads after terminal state | Delete after 7 days. |
-| Superseded/stale attempt artifacts | Delete after 7 days unless needed for debugging. |
-| Generated customer artifacts | Keep 30 days after delivery, then delete or archive. |
-| Final ZIP | Keep 30 days after delivery, then delete or archive. |
-| Internal manifests and QA reports | Keep up to 90 days if sanitized. |
-| Prompt logs and generation notes | Keep 30 days unless sanitized and approved longer. |
-| Request metadata | Keep 90 days after terminal state, then minimize or delete. |
-| CloudWatch logs | 30 days for `dev`/`demo`; 90 days for future `prod` after review. |
-
-Cleanup must never delete active latest attempts in `submitted`, `validating`, `generating`, `qa_checking`, or `packaging`.
-
-## Demo Verification Fixtures
-
-Use fake, owned, licensed, public-domain, or generated-safe assets. Do not commit private customer photos.
-
-Required fixture coverage:
-
-- Happy path with 1 photo.
-- Happy path with 5 photos.
-- `needs_customer_input` amendable case.
-- `needs_customer_input` non-amendable case.
-- `blocked` rights/scope case.
-- `failed` generation or QA case.
-- Stale attempt rejected.
-- Incompatible prefix rejected.
-
-End-to-end demo checks:
-
-1. Upload fixture assets.
-2. Submit request.
-3. Confirm LLD-02 creates `attempt_id`.
-4. Confirm generation writes customer/internal refs under canonical prefix.
-5. Confirm `internal/generation_manifest.json`.
-6. Confirm QA writes `qa/quality_report.json`.
-7. Confirm packaging writes `package/manifest.json`.
-8. Confirm final ZIP at `package/final_download_pack.zip`.
-9. Confirm ZIP contains exactly the M1 customer files.
-10. Confirm ZIP excludes internal and source artifacts.
-11. Confirm stale attempt does not deliver.
-12. Confirm logs do not expose tokens, signed URLs, source photos, secrets, or private notes.
+M1 does not implement application-data cleanup, archive, or complex recovery. Task tokens expire 30 days after Task creation. SQS DLQ messages are retained for 14 days.
 
 ## Acceptance Checks
 
-- Runtime uses CloudFront/S3, API Gateway/Lambda, DynamoDB, private S3, optional SES, and CloudWatch.
-- LLD-05 is explicit canonical prefix authority.
-- Only `customer/`, `internal/`, `qa/`, and `package/` are canonical attempt child directories.
-- `attempt_id`, `generation_version`, and `latest_eligible_attempt_id` are present in runtime flow.
-- LLD-03 writes `internal/generation_manifest.json`.
-- LLD-04 writes `qa/quality_report.json`, `package/manifest.json`, and `package/final_download_pack.zip`.
-- Request tokens use URL fragment plus `Authorization: Bearer`.
-- Upload and download URLs are short-lived.
-- Logs redact tokens, signed URL signatures, customer email, and secrets.
-- Retention rules exist before demo or wider testing.
-- Demo fixtures cover happy path, failed, blocked, needs-input, stale-attempt, and incompatible-prefix cases.
-- No Cognito/accounts, payment, marketplace, POD, NFT, public gallery, or operator gate is introduced.
+- Runtime uses CloudFront/S3, API Gateway/Lambda, DynamoDB, private S3, SQS, Generation Lambda, and an SQS DLQ.
+- Storage uses tasks/{task_id}/uploads/ and tasks/{task_id}/attempts/{attempt_id}/.
+- `Attempt` storage contains `input.json` and `postcard.png` only.
+- Upload/download URLs are short-lived.
+- Generation Lambda timeout is shorter than the 10-minute SQS visibility timeout, and provider calls time out before the Lambda.
+- Private S3 has Block Public Access and default encryption.
+- `Task` tokens use URL fragment plus Authorization: Bearer.
+- Redelivered SQS messages do not create duplicate artifacts.
+- Logs do not expose secrets or private customer content.
+- SES, WAF, Step Functions, rights workflows, ZIP packaging, and complex observability are not required.
 
-## Open Questions
+## Deployment Parameters
 
-- AWS region and domain for demo.
-- Whether demo uses SSE-S3 or SSE-KMS before real tester uploads.
-- Whether SES email is enabled for demo.
-- Exact request token lifetime relative to deliverable retention.
-- Whether WAF is needed for demo or deferred.
-- Final manual inspection policy before broader launch.
+No remaining M1 runtime contract questions. AWS region and demo domain are deployment parameters.
