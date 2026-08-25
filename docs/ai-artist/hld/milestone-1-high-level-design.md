@@ -114,9 +114,9 @@ Runtime responsibilities:
 ## 6. Primary Runtime Flow
 
 1. The browser creates a draft Task and receives a one-time raw Task token.
-2. The browser requests upload slots and uploads 1 to 5 JPEG/PNG photos directly to private S3.
-3. The browser confirms each upload; the backend validates stored object metadata.
-4. When title, note, style, and all photos are complete, the Task becomes `ready`.
+2. The user adds one or more JPEG/PNG photos; the browser requests slots for that batch and uploads directly to private S3.
+3. The browser confirms each upload; the backend validates stored object metadata. The user may repeat this step one photo or one batch at a time.
+4. The user selects `Done adding photos`; the backend validates title, note, style, 1–5 uploaded Assets, and no pending slots, then sets the Task to `ready`.
 5. `Generate` creates Attempt 1 with a complete immutable snapshot and status `queued`.
 6. The backend sends `StartGenerationCommand` to SQS.
 7. Generation Lambda claims the Attempt, generates the postcard, performs minimum output verification, writes Artifact metadata, and directly updates the Attempt to `ready` or `failed`.

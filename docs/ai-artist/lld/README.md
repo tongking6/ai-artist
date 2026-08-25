@@ -100,6 +100,8 @@ All task-scoped APIs require this bearer token. The token is valid for 30 days f
 
 M1 upload limits are `image/jpeg` or `image/png`, up to 20 MB per photo and 5 photos per Task.
 
+The user adds photos one at a time or in batches. Each upload-slots request reserves slots for newly selected files; the user never needs to declare the final photo count in advance. A separate complete-intake action changes the Task from `uploading` to `ready` and freezes the base inputs.
+
 Customer download is a fresh short-lived URL for a ready postcard Artifact only.
 
 ## Implementation Order

@@ -91,15 +91,18 @@ UX requirements:
 
 - Show per-photo upload progress.
 - Accept only JPEG and PNG photos, up to 20 MB per photo and 5 photos per Task.
-- Request the desired total photo count in the upload-slots request.
-- Do not offer a lower photo count while uploaded or pending slots already exceed it; wait for pending slots to expire.
+- Let the user add one photo or a batch of photos through the file picker; do not ask for the final photo count first.
+- Request upload slots for the newly selected files.
+- Disable `Add photo` when 5 photos are uploaded or pending.
+- Keep the Task in `uploading` while the user is adding photos.
+- Provide a `Done adding photos` action that calls the complete-intake API.
 - Expire stale upload slots gracefully.
 - Let the user retry a failed upload with a fresh backend-issued slot.
 - Do not expose private bucket names, object keys, signed URL query strings, or task tokens.
 
 ### Generate And Refine
 
-The Generate screen shows:
+The Generate screen is available after complete-intake succeeds and the Task is `ready`. It shows:
 
 - Photo count.
 - Title, note, and style.
@@ -118,7 +121,7 @@ Task status:
 | Status | Customer behavior |
 | --- | --- |
 | `draft` | Required text fields or photos are incomplete. |
-| `uploading` | Photos are being uploaded. |
+| `uploading` | Photos are being uploaded or the user can still add photos before completing intake. |
 | `ready` | Input is complete and can generate or refine. |
 
 Attempt status:
@@ -202,6 +205,7 @@ LLD-01 provides:
 ## Acceptance Checks
 
 - A user can create a draft, upload 1 to 5 photos, enter title/note/style, and reach task status `ready`.
+- The user can add photos one at a time or in batches before completing intake.
 - The first Generate action creates Attempt 1.
 - A refinement submits only `refinement_note` and creates a later attempt only when no attempt is queued or generating.
 - The UI does not expose internal artifacts or private storage details.

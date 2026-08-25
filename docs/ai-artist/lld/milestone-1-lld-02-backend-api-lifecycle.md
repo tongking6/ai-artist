@@ -65,6 +65,20 @@ The task remains `ready` when an attempt fails. A new attempt may be created wit
 
 Only one attempt may be `queued` or `generating` for a task at a time.
 
+Task status transitions:
+
+```text
+create Task                                      -> draft
+upload-slots creates a pending slot              -> uploading
+asset complete succeeds while input is incomplete -> uploading
+asset validation fails                            -> current Task status unchanged
+all pending slots expire with no uploaded Asset  -> draft
+all selected Assets uploaded                     -> uploading until complete-intake
+complete-intake succeeds                         -> ready
+```
+
+An expired pending slot releases capacity but does not change any uploaded Asset. A Task with at least one uploaded Asset remains `uploading` until the user completes intake; a Task with no uploaded or pending Assets is `draft`.
+
 ## Task Metadata
 
 Recommended task record shape:
@@ -93,7 +107,7 @@ Task rules:
 
 - A draft task is created before photo upload so the browser has a task identity.
 - The task accepts 1 to 5 photos, one title, one note, and one style.
-- The Task status is `ready` only when title, note, style, and 1 to 5 uploaded photos are complete.
+- The Task status becomes `ready` only after explicit complete-intake succeeds with title, note, style, 1 to 5 uploaded photos, and no pending slots.
 - After the task becomes `ready`, these base inputs are immutable.
 - After any Attempt exists, these base inputs are immutable.
 - Rights, copyright, and amendment workflows are not part of this first version.
@@ -345,7 +359,24 @@ Rules:
 - Omitted fields remain unchanged.
 - The endpoint is allowed only while the Task is `draft` or `uploading` and before any Attempt exists.
 - It returns a conflict once the Task is `ready` or any Attempt exists.
-- After the update, the backend recalculates Task status from metadata completeness and uploaded Asset count.
+- After the update, the backend recalculates input completeness; the Task remains `uploading` until `complete-intake` succeeds.
+
+### Complete Intake
+
+```http
+POST /v1/tasks/{task_id}/complete-intake
+Authorization: Bearer <task_access_token>
+```
+
+Finalizes the upload step and freezes the Task base inputs.
+
+Rules:
+
+- The endpoint is allowed only while the Task is `draft` or `uploading` and before any Attempt exists.
+- It requires complete title, note, and style metadata.
+- It requires 1 to 5 uploaded Assets and zero pending upload slots.
+- On success, the Task status becomes `ready`.
+- If validation fails, the Task remains `uploading` and the response identifies the missing input or pending upload condition.
 
 ### Upload Slots
 
@@ -361,7 +392,7 @@ Request body:
 }
 ```
 
-`photo_count` is the requested total number of photos for the Task and must be an integer from 1 through 5. The backend creates server-owned short-lived upload slots until the Task has that many uploaded or pending Assets. The browser uploads directly to private S3 and then confirms each uploaded asset through:
+`photo_count` is the number of newly selected photos for this upload request and must be an integer from 1 through 5. The backend creates that many server-owned short-lived upload slots. The browser uploads directly to private S3 and then confirms each uploaded asset through:
 
 ```http
 POST /v1/tasks/{task_id}/assets/{asset_id}/complete
@@ -373,10 +404,11 @@ Upload-slot rules:
 
 - The endpoint is allowed while the Task is `draft` or `uploading`, before any Attempt exists.
 - Repeated requests may be made while intake is incomplete.
-- Unexpired pending slots are reused; new slots are created only for the missing count.
-- `photo_count` must not be lower than the current uploaded plus pending Asset count. M1 does not cancel surplus pending slots; the user must wait for them to expire before requesting a smaller count.
-- The backend rejects any request that would exceed 5 uploaded or pending Assets.
-- Once the requested Assets are uploaded and title, note, and style are complete, the Task becomes `ready`.
+- Each request reserves slots only for newly selected files; a retry for the same file may reuse its existing pending slot.
+- The backend rejects any request where `uploaded_assets + pending_slots + photo_count > 5`.
+- M1 does not require a final photo count and does not cancel pending slots. Expired pending slots release their capacity for a later request.
+- Creating upload slots or confirming an upload moves a `draft` Task to `uploading`.
+- The Task remains `uploading` while the user may add more photos. It becomes `ready` only through `POST /complete-intake` after all selected uploads are complete.
 
 Asset-complete behavior:
 
@@ -476,9 +508,9 @@ LLD-02 provides:
 - Task tokens are hash-only server side and never accepted in query/path/cookie/body.
 - `PATCH /v1/tasks/{task_id}` persists only title, note, and style before the Task is ready or any Attempt exists.
 - Task metadata validation is `title` 1–120 characters, `note` 1–1000 characters, and `style = warm_handmade`.
-- Task status becomes `ready` only when metadata is complete and 1 to 5 Assets are uploaded.
+- `POST /v1/tasks/{task_id}/complete-intake` requires complete metadata, 1 to 5 uploaded Assets, and zero pending slots before setting Task status to `ready`.
 - Upload slots use server-owned private keys and short TTLs.
-- `POST /v1/tasks/{task_id}/upload-slots` requires `photo_count` from 1 through 5, reuses unexpired pending slots, and never creates more than 5 uploaded or pending Assets.
+- `POST /v1/tasks/{task_id}/upload-slots` requires the count of newly selected photos, enforces `uploaded + pending + requested <= 5`, and never creates more than 5 uploaded or pending Assets.
 - A repeated asset-complete call for an uploaded Asset is idempotent and cannot bind the Asset to another Task.
 - Attempt `input.json` contains the complete input snapshot and one fixed postcard PNG target.
 - Every attempt has an immutable input snapshot and a refinement note.
@@ -489,5 +521,17 @@ LLD-02 provides:
 
 ## Fixed Error Behavior
 
-- A missing or not-ready artifact returns `409 artifact_not_ready` with `retryable: true`; an artifact that does not belong to the Task returns `404 artifact_not_found` with `retryable: false`.
 - API errors use `{ "code": "...", "message": "...", "retryable": true|false }`.
+
+| Endpoint condition | HTTP status | Error code | Retryable |
+| --- | ---: | --- | --- |
+| Task metadata violates length/style rules | 400 | `invalid_task_metadata` | false |
+| Task is ready or has an Attempt and receives a base-input mutation | 409 | `task_immutable` | false |
+| `photo_count` is invalid or exceeds the 5-photo capacity | 400 | `invalid_photo_count` | false |
+| Asset ID does not exist for this Task | 404 | `asset_not_found` | false |
+| Asset belongs to another Task | 409 | `asset_not_owned_by_task` | false |
+| Uploaded object is missing or fails validation | 422 | `uploaded_asset_invalid` | false |
+| Complete-intake has incomplete metadata or no uploaded Asset | 409 | `intake_not_complete` | false |
+| Complete-intake has pending upload slots | 409 | `pending_uploads_exist` | true |
+| Artifact is missing or not ready | 409 | `artifact_not_ready` | true |
+| Artifact does not belong to the Task | 404 | `artifact_not_found` | false |
