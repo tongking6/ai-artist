@@ -92,7 +92,7 @@ UX requirements:
 - Show per-photo upload progress.
 - Accept only JPEG and PNG photos, up to 20 MB per photo and 5 photos per Task.
 - Let the user add one photo or a batch of photos through the file picker; do not ask for the final photo count first.
-- Request upload slots for the newly selected files.
+- Request upload slots for the newly selected files with a new batch-level `idempotency_key`; reuse that key if the request is retried.
 - Disable `Add photo` when 5 photos are uploaded or pending.
 - Keep the Task in `uploading` while the user is adding photos.
 - Provide a `Done adding photos` action that calls the complete-intake API.

@@ -142,7 +142,7 @@ Rules:
 
 The browser requests upload slots from the Backend API. The backend creates server-owned object keys and returns short-lived upload instructions.
 
-Recommended upload slot shape:
+Each upload slot item has this shape:
 
 ```json
 {
@@ -159,6 +159,26 @@ Recommended upload slot shape:
     "accepted_media_types": ["image/jpeg", "image/png"],
   "max_bytes": 20971520
   }
+}
+```
+
+The upload-slots endpoint always returns an array envelope:
+
+```json
+{
+  "slots": [
+    {
+      "slot_id": "slot_01J...",
+      "asset_id": "asset_01J...",
+      "upload_method": "presigned_post",
+      "expires_at": "2026-08-25T12:15:00Z",
+      "fields": {},
+      "constraints": {
+        "accepted_media_types": ["image/jpeg", "image/png"],
+        "max_bytes": 20971520
+      }
+    }
+  ]
 }
 ```
 
@@ -187,6 +207,7 @@ Pending Asset schema:
   "media_type": "image/jpeg",
   "size_bytes": null,
   "upload_status": "pending",
+  "upload_batch_key": "upload_batch_01J...",
   "slot_expires_at": "2026-08-25T12:15:00Z",
   "uploaded_at": null,
   "storage_ref": {
@@ -196,7 +217,7 @@ Pending Asset schema:
 }
 ```
 
-After successful S3 validation, the same record is updated with `upload_status = uploaded`, the verified `size_bytes`, and `uploaded_at`. Asset upload status transitions are:
+The server persists the batch idempotency key as `upload_batch_key` on each reservation. After successful S3 validation, the same record is updated with `upload_status = uploaded`, the verified `size_bytes`, and `uploaded_at`. Asset upload status transitions are:
 
 ```text
 pending -> uploaded
@@ -411,7 +432,8 @@ Request body:
 
 ```json
 {
-  "photo_count": 3
+  "photo_count": 3,
+  "idempotency_key": "upload_batch_01J..."
 }
 ```
 
@@ -427,6 +449,10 @@ Upload-slot rules:
 
 - The endpoint is allowed while the Task is `draft` or `uploading`, before any Attempt exists.
 - Repeated requests may be made while intake is incomplete.
+- `idempotency_key` is required, opaque, unique per Task and per Add-photo batch, and reused when the same request is retried.
+- A retry with the same Task and `idempotency_key` returns the original `slots` array and creates no new Asset reservations.
+- Reusing the same key with a different `photo_count` returns `upload_batch_mismatch`.
+- A batch key whose reservations have all expired returns `upload_batch_expired`; the client must use a new key for a new batch.
 - Each request reserves slots only for newly selected files; a retry for the same file may reuse its existing pending slot.
 - The backend rejects any request where `uploaded_assets + pending_slots + photo_count > 5`.
 - M1 does not require a final photo count and does not cancel pending slots. Expired pending slots release their capacity for a later request.
@@ -535,6 +561,7 @@ LLD-02 provides:
 - `POST /v1/tasks/{task_id}/complete-intake` requires complete metadata, 1 to 5 uploaded Assets, and zero pending slots before setting Task status to `ready`.
 - Upload slots use server-owned private keys and short TTLs.
 - `POST /v1/tasks/{task_id}/upload-slots` requires the count of newly selected photos, enforces `uploaded + pending + requested <= 5`, and never creates more than 5 uploaded or pending Assets.
+- Upload-slots retries with the same Task and `idempotency_key` return the same `slots` array without creating new reservations.
 - A repeated asset-complete call for an uploaded Asset is idempotent and cannot bind the Asset to another Task.
 - Pending upload reservations are persisted as Asset records with `pending`, `uploaded`, or `expired` status; capacity counts only unexpired pending reservations.
 - Attempt `input.json` contains the complete input snapshot and one fixed postcard PNG target.
@@ -553,6 +580,8 @@ LLD-02 provides:
 | Task metadata violates length/style rules | 400 | `invalid_task_metadata` | false |
 | Task is ready or has an Attempt and receives a base-input mutation | 409 | `task_immutable` | false |
 | `photo_count` is invalid or exceeds the 5-photo capacity | 400 | `invalid_photo_count` | false |
+| Same idempotency key is reused with a different `photo_count` | 409 | `upload_batch_mismatch` | false |
+| Same idempotency key refers to fully expired reservations | 409 | `upload_batch_expired` | false |
 | Asset ID does not exist for this Task | 404 | `asset_not_found` | false |
 | Asset belongs to another Task | 409 | `asset_not_owned_by_task` | false |
 | Uploaded object is missing or fails validation | 422 | `uploaded_asset_invalid` | false |
