@@ -175,7 +175,9 @@ LLD-02/05 own source-upload layout. LLD-04 does not define source-upload paths.
 
 ## Asset And Attempt Model
 
-Each photo is a task-owned asset. Upload slots are temporary; the uploaded asset metadata is durable.
+Each photo reservation is a task-owned `Asset` record. M1 does not introduce a separate `UploadSlot` record; a pending Asset is the durable reservation created for one upload slot.
+
+Pending Asset schema:
 
 ```json
 {
@@ -183,14 +185,35 @@ Each photo is a task-owned asset. Upload slots are temporary; the uploaded asset
   "task_id": "task_01J...",
   "filename": "kyoto.jpg",
   "media_type": "image/jpeg",
-  "size_bytes": 4821930,
-  "upload_status": "uploaded",
+  "size_bytes": null,
+  "upload_status": "pending",
+  "slot_expires_at": "2026-08-25T12:15:00Z",
+  "uploaded_at": null,
   "storage_ref": {
     "bucket": "private-runtime-bucket",
     "key": "tasks/task_01J.../uploads/asset_01J....jpg"
   }
 }
 ```
+
+After successful S3 validation, the same record is updated with `upload_status = uploaded`, the verified `size_bytes`, and `uploaded_at`. Asset upload status transitions are:
+
+```text
+pending -> uploaded
+pending -> expired
+```
+
+An expired pending Asset is not capacity. The backend may mark it `expired` lazily when reading or mutating the Task; it must treat `slot_expires_at <= now` as expired even before that write. A `complete` call for an expired reservation returns `upload_slot_expired`.
+
+Capacity is derived from Asset records, not a separate Task counter:
+
+```text
+uploaded_count = Assets with upload_status = uploaded
+pending_count = Assets with upload_status = pending and slot_expires_at > now
+available_count = 5 - uploaded_count - pending_count
+```
+
+New upload slots are allowed only when `requested_new_slots <= available_count`. `complete-intake` requires 1 to 5 uploaded Assets and `pending_count = 0`.
 
 The browser never receives `storage_ref`.
 
@@ -414,6 +437,7 @@ Asset-complete behavior:
 
 - If the Asset is already `uploaded`, the endpoint returns the existing Asset metadata without revalidating or creating a duplicate record.
 - If the object is missing or validation fails, the endpoint returns an explicit error and does not mark the Asset `uploaded`.
+- If the reservation has expired, the endpoint returns `upload_slot_expired` and does not validate or mark the Asset `uploaded`.
 - An uploaded Asset is permanently bound to its Task and cannot be completed or attached through another Task.
 
 ### Generate And Refine
@@ -512,6 +536,7 @@ LLD-02 provides:
 - Upload slots use server-owned private keys and short TTLs.
 - `POST /v1/tasks/{task_id}/upload-slots` requires the count of newly selected photos, enforces `uploaded + pending + requested <= 5`, and never creates more than 5 uploaded or pending Assets.
 - A repeated asset-complete call for an uploaded Asset is idempotent and cannot bind the Asset to another Task.
+- Pending upload reservations are persisted as Asset records with `pending`, `uploaded`, or `expired` status; capacity counts only unexpired pending reservations.
 - Attempt `input.json` contains the complete input snapshot and one fixed postcard PNG target.
 - Every attempt has an immutable input snapshot and a refinement note.
 - `StartGenerationCommand` includes `attempt_id` and an attempt-scoped output prefix.
@@ -531,6 +556,7 @@ LLD-02 provides:
 | Asset ID does not exist for this Task | 404 | `asset_not_found` | false |
 | Asset belongs to another Task | 409 | `asset_not_owned_by_task` | false |
 | Uploaded object is missing or fails validation | 422 | `uploaded_asset_invalid` | false |
+| Upload reservation has expired | 409 | `upload_slot_expired` | false |
 | Complete-intake has incomplete metadata or no uploaded Asset | 409 | `intake_not_complete` | false |
 | Complete-intake has pending upload slots | 409 | `pending_uploads_exist` | true |
 | Artifact is missing or not ready | 409 | `artifact_not_ready` | true |
