@@ -15,9 +15,9 @@
 | --- | --- | --- |
 | [LLD-00](./milestone-1-lld-00-implementation-foundation.md) | Implementation Foundation | Implementation-ready |
 | [LLD-01](./milestone-1-lld-01-website-intake-status-delivery.md) | Website Task Intake, Status, Refinement, and Delivery UX | Implementation-ready draft |
-| [LLD-02](./milestone-1-lld-02-backend-api-lifecycle.md) | Backend API, Task Data Model, Attempts, Upload/Download Links | Implementation-ready draft |
+| [LLD-02](./milestone-1-lld-02-backend-api-lifecycle.md) | Backend API, Task Data Model, Attempts, Upload/Download Links | Implementation-ready; schema and API finalized |
 | [LLD-03](./milestone-1-lld-03-generation-worker.md) | Postcard Generation Worker and Minimum Verification | Implementation-ready draft |
-| [LLD-05](./milestone-1-lld-05-runtime-security-ops.md) | Home Kubernetes Runtime, Storage, Security, Jobs, and Retention | Implementation-ready draft |
+| [LLD-05](./milestone-1-lld-05-runtime-security-ops.md) | Home Kubernetes Runtime, Storage, Security, and Attempt Queue | Implementation-ready draft |
 
 [LLD-04](./milestone-1-lld-04-qa-packaging-delivery.md) is deferred and is not part of the M1 execution path.
 
@@ -26,7 +26,7 @@
 M1 contains:
 
 - `Task`: immutable base input with 1 to 5 photos, title, note, style, and Task status.
-- `Attempt`: one generation execution with a complete input snapshot, optional refinement note, and Attempt status.
+- `Attempt`: one generation execution with a complete input snapshot and Attempt status; the refinement note is null for Attempt 1 and required later.
 - `Artifact`: one fixed-dimension `1800x1200` postcard PNG owned by an Attempt.
 
 Statuses are separate:
@@ -47,11 +47,7 @@ Only one Attempt for a Task may be `queued` or `generating`.
 
 ### Input Snapshot
 
-LLD-02 writes:
-
-```text
-tasks/{task_id}/attempts/{attempt_id}/input.json
-```
+LLD-02 writes the immutable PostgreSQL `attempts.input_snapshot` JSONB value.
 
 The snapshot contains:
 
@@ -61,7 +57,7 @@ The snapshot contains:
 - `style`
 - `refinement_note`
 
-LLD-03 reads this immutable snapshot and does not mutate it.
+LLD-03 reads this immutable row value and does not mutate it.
 
 ### Storage
 
@@ -71,36 +67,31 @@ LLD-05 owns:
 tasks/{task_id}/
   uploads/{asset_id}.{normalized_ext}
   attempts/{attempt_id}/
-    input.json
     postcard.png
 ```
 
 ### Generation
 
-- LLD-02 creates the Attempt and atomically persists a `StartGenerationCommand` job in PostgreSQL.
+- LLD-02 creates a queued Attempt and atomically updates `tasks.current_attempt_id`; PostgreSQL contains exactly four application tables.
+- Initial generation and later refinement both use `POST /v1/tasks/{task_id}/attempts`; only the request body and existing Attempt history distinguish them.
+- LLD-03 claims the oldest queued Attempt directly with lease fencing.
 - LLD-03 directly updates Attempt status.
 - LLD-03 generates exactly one `1800x1200` PNG.
 - LLD-03 performs minimum verification before setting `ready`.
 - LLD-03 makes at most one OpenAI Image API call per Attempt using `gpt-image-2-2026-04-21`; the fake provider remains available for deterministic tests.
 - The OpenAI adapter requests a `1808x1200` PNG and the Worker deterministically center-crops it to the fixed `1800x1200` artifact contract.
-- A claimed generation job is never automatically retried or redelivered in M1.
+- A claimed Attempt is never automatically retried or returned to `queued` in M1.
 - LLD-04 is not required.
 
 ### Customer Access
 
-Task link:
+Phase 1 Task link:
 
 ```text
-https://ai-artist.home.arpa/task/{task_id}#access_token={task_access_token}
+https://ai-artist.home.arpa/tasks/{task_id}
 ```
 
-The browser sends the token as:
-
-```http
-Authorization: Bearer <task_access_token>
-```
-
-All task-scoped APIs require this bearer token. The token is valid for 30 days from Task creation.
+Phase 1 has no application-layer login or Task token. Trusted home-LAN membership is the access boundary. Authentication and authorization must be designed before public or AWS-facing exposure.
 
 M1 upload limits are `image/jpeg` or `image/png`, up to 20 MB per photo and 5 photos per Task.
 
@@ -112,7 +103,7 @@ Customer download is a fresh short-lived URL for a ready postcard Artifact only.
 
 1. LLD-00 Next.js/React/TypeScript frontend and Python backend foundation.
 2. LLD-02 Task/Asset/Attempt persistence and customer API.
-3. LLD-05 single-node home Kubernetes runtime, PostgreSQL, private S3-compatible storage, and single-delivery job retention.
+3. LLD-05 single-node home Kubernetes runtime, PostgreSQL, private S3-compatible storage, and single-delivery Attempt claiming.
 4. LLD-01 website intake, upload, status, refinement, and download UX.
 5. LLD-03 OpenAI generation, deterministic fake-provider tests, normalization, and minimum verification.
 6. End-to-end verification for one-photo, five-photo, refinement, terminal failure, and artifact download flows.

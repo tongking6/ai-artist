@@ -43,8 +43,8 @@ services/
     pyproject.toml
     src/ai_artist/
       api/                     # FastAPI routes and customer API schemas
-      domain/                  # Task, Asset, Attempt, Artifact, job rules
-      worker/                  # StartGenerationCommand consumer
+      domain/                  # Task, Asset, Attempt, Artifact, queue rules
+      worker/                  # Queued-Attempt consumer
       adapters/
         database/              # SQLAlchemy repositories
         object_store/          # S3-compatible ObjectStore
@@ -72,13 +72,13 @@ The scaffold may add framework-generated support files, but it must preserve the
 - FastAPI owns the LLD-02 routes and OpenAPI schema.
 - Pydantic models implement request and response validation at the HTTP boundary.
 - SQLAlchemy repositories hide PostgreSQL details from domain logic.
-- Attempt creation and job creation share one database transaction.
+- Attempt creation and `tasks.current_attempt_id` update share one database transaction.
 - The API process never calls the image-generation provider.
 
 ### Generation Worker
 
 - The Worker imports the same Python domain and adapter interfaces as the API.
-- It claims the PostgreSQL job defined by LLD-05, calls the configured LLD-03 provider, normalizes and verifies the image through Pillow, and finalizes the Attempt.
+- It claims the PostgreSQL Attempt defined by LLD-02/05, calls the configured LLD-03 provider, normalizes and verifies the image through Pillow, and finalizes the Attempt.
 - Only the Worker receives `OPENAI_API_KEY`.
 - API and Worker use the same backend image but separate Kubernetes Deployments and entry commands.
 
@@ -86,10 +86,10 @@ The scaffold may add framework-generated support files, but it must preserve the
 
 | Contract | Owning document |
 | --- | --- |
-| Screens, browser token handling, upload/status/download UX | LLD-01 |
+| Screens and upload/status/download UX | LLD-01 |
 | HTTP payloads, Task/Asset/Attempt/Artifact models | LLD-02 |
 | OpenAI request, output normalization, and minimum verification | LLD-03 |
-| Kubernetes, PostgreSQL jobs, MinIO, Secrets, LAN boundary | LLD-05 |
+| Kubernetes, PostgreSQL Attempt queue, MinIO, Secrets, LAN boundary | LLD-05 |
 
 FastAPI's generated OpenAPI document may be used to generate or validate TypeScript client types. It must not become a competing hand-written contract.
 
@@ -101,7 +101,7 @@ Implementation is not foundation-complete until:
 - The Python package passes linting/type checks selected by the scaffold and `pytest`.
 - Alembic can migrate an empty PostgreSQL database to the current schema.
 - API and Worker containers build from a clean checkout.
-- The fake-provider Playwright flow covers create Task -> upload -> complete intake -> generate -> ready -> download.
+- The fake-provider Playwright flow covers create Task -> upload -> complete intake -> create Attempt -> ready -> download.
 - Kubernetes manifests render or validate without embedding Secret values.
 
 ## Deferred Decisions

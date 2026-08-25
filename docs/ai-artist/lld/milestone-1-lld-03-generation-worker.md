@@ -14,13 +14,13 @@
 
 LLD-03 defines the internal worker that turns one immutable Attempt snapshot and 1 to 5 source photos into one postcard PNG.
 
-The worker is not customer-facing. It consumes an internal `StartGenerationCommand`, reads private inputs, generates one artifact, performs deterministic minimum verification, writes artifact metadata, and directly updates the Attempt status.
+The worker is not customer-facing. It atomically claims a queued Attempt from PostgreSQL, reads its immutable inputs, generates one artifact, performs deterministic minimum verification, writes artifact metadata, and directly updates the Attempt status.
 
 ## In Scope
 
-- `StartGenerationCommand` consumption.
+- Durable queued-Attempt claiming with lease fencing.
 - Attempt execution and status updates.
-- Reading the Attempt `input.json` snapshot.
+- Reading the Attempt `input_snapshot` JSONB value.
 - Reading 1 to 5 private source photos.
 - A provider boundary with one M1 production adapter: OpenAI Image API.
 - Fixed `gpt-image-2-2026-04-21` model and image-edit request contract.
@@ -48,25 +48,18 @@ The worker is not customer-facing. It consumes an internal `StartGenerationComma
 
 `attempt_id` is the identity of one generation execution. M1 does not introduce a separate `generation_job_id`, `generation_version`, or freshness identifier.
 
-LLD-03 consumes:
+LLD-03 claims this PostgreSQL Attempt shape:
 
 ```json
 {
-  "command_version": "m1.start_generation.v1",
-  "task_id": "task_01J...",
   "attempt_id": "att_01J...",
-  "input_snapshot_ref": {
-    "bucket": "private-runtime-bucket",
-    "key": "tasks/task_01J.../attempts/att_01J.../input.json",
-    "sha256": "..."
-  },
-  "source_asset_ids": [
-    "asset_01J...",
-    "asset_02J..."
-  ],
-  "output_prefix": "tasks/task_01J.../attempts/att_01J.../",
-  "idempotency_key": "task_01J...:attempt_att_01J...",
-  "created_at": "2026-08-24T00:00:00Z"
+  "task_id": "task_01J...",
+  "status": "queued",
+  "input_snapshot": {},
+  "provider_id": "openai",
+  "provider_model": "gpt-image-2-2026-04-21",
+  "lease_token": null,
+  "lease_expires_at": null
 }
 ```
 
@@ -86,25 +79,24 @@ Rules:
 
 - LLD-03 does not create `task_id` or `attempt_id`.
 - LLD-03 does not modify the input snapshot.
-- `source_asset_ids` must match the snapshot photo references.
-- The job table prevents a duplicate command with the same `idempotency_key`; if one is observed, the worker must not make another provider call or create another artifact.
+- Source Asset rows must match the snapshot photo references and the same Task.
+- The partial unique active-Attempt index and conditional claim prevent duplicate active execution for one Task.
 - Platform invocation IDs may be used in logs only; they are not domain fields or cross-service contract fields.
-- A claimed job is single-delivery in M1. Failure or lease expiry is terminal for that Attempt and never re-enqueues the command.
+- A claimed Attempt is single-delivery in M1. Failure or lease expiry is terminal and never returns it to `queued`.
 - The worker makes at most one provider invocation for an Attempt.
 
 ## Worker Flow
 
 ```mermaid
 sequenceDiagram
-  participant API as LLD-02 Backend API
   participant W as LLD-03 Generation Worker
   participant OS as Private Object Store
   participant P as OpenAI Image API
-  participant DB as Task/Attempt Record
+  participant DB as PostgreSQL
 
-  API->>W: StartGenerationCommand
-  W->>DB: queued -> generating
-  W->>OS: Read input.json and source photos
+  W->>DB: Claim queued Attempt with lease token
+  DB-->>W: Attempt input_snapshot and Asset metadata
+  W->>OS: Read source photos
   W->>P: Generate postcard through outbound HTTPS
   P-->>W: PNG bytes
   W->>OS: Write postcard.png
@@ -135,7 +127,7 @@ Successful generation and verification:
 generating -> ready
 ```
 
-Provider, storage, or verification failure:
+Provider, storage, normalization, verification, or lease-expiry failure:
 
 ```text
 generating -> failed
@@ -143,7 +135,7 @@ generating -> failed
 
 LLD-03 must not claim an Attempt that is already `ready`, `failed`, or owned by another active execution.
 
-There is no automatic generation retry. A failed Attempt remains immutable and terminal. A customer may later create a distinct Attempt with a new `attempt_id` and optional `refinement_note`; that is a new generation request, not a retry of the failed job.
+There is no automatic generation retry. A failed Attempt remains immutable and terminal. A customer may later create a distinct Attempt with a new `attempt_id` and required `refinement_note`; that is a new generation request, not a retry of the failed Attempt.
 
 ## External Provider Boundary
 
@@ -152,7 +144,7 @@ Provider-specific calls live behind a small adapter:
 ```python
 class GenerationProvider(Protocol):
     provider_id: str
-    provider_version: str
+    provider_model: str
 
     def generate_postcard(self, input: GeneratePostcardInput) -> GeneratedImage:
         ...
@@ -230,12 +222,11 @@ Artifact metadata:
   "height": 1200,
   "size_bytes": 1248290,
   "sha256": "...",
-  "storage_key": "tasks/task_01J.../attempts/att_01J.../postcard.png",
-  "status": "ready"
+  "storage_key": "tasks/task_01J.../attempts/att_01J.../postcard.png"
 }
 ```
 
-The storage key is internal and is not returned through the customer metadata API.
+The database stores the normative LLD-02 Artifact columns. Width and height above are derived fixed-contract metadata, not database columns. The storage key is internal and is not returned through the customer metadata API.
 
 ## Minimum Output Verification
 
@@ -281,14 +272,14 @@ Customer-facing Attempt failure metadata must be safe:
 
 Internal logs may retain a narrow failure category and platform/provider correlation ID, but must not contain secrets, signed URLs, raw images, credentials, or unnecessary customer content.
 
-Provider failure, output normalization failure, output verification failure, and job lease expiry all make the current Attempt terminal. No code path automatically calls the provider again. LLD-05 owns the conditional job finalization and expired-lease reconciliation that prevent a late Worker response from overwriting a terminal failure.
+Provider failure, output normalization failure, output verification failure, and Attempt lease expiry all make the current Attempt terminal. No code path automatically calls the provider again. LLD-05 owns conditional Attempt finalization and expired-lease reconciliation so a late Worker response cannot overwrite terminal failure.
 
 ## Dependencies
 
 LLD-03 depends on:
 
-- LLD-02 for `StartGenerationCommand`, Task/Attempt records, immutable input snapshots, source asset metadata, and Attempt creation.
-- LLD-05 for private object storage, durable jobs, runtime mode, provider secrets, retention, and observability.
+- LLD-02 for the four-table schema, queued Attempt rows, immutable input snapshots, source Asset metadata, and Attempt creation.
+- LLD-05 for private object storage, Attempt claiming/leases, runtime mode, provider secrets, retention, and observability.
 
 LLD-03 provides:
 
@@ -300,7 +291,7 @@ LLD-03 provides:
 
 ## Acceptance Checks
 
-- LLD-03 consumes the simplified `StartGenerationCommand`.
+- LLD-03 atomically claims the oldest queued Attempt from PostgreSQL.
 - No separate `generation_job_id`, `generation_version`, or `latest_eligible_attempt_id` is used.
 - The worker reads the immutable Attempt snapshot.
 - The worker supports 1 to 5 source photos.
@@ -308,8 +299,8 @@ LLD-03 provides:
 - Minimum output verification runs before `Attempt.status = ready`.
 - Generation or verification failures set `Attempt.status = failed`.
 - The Worker makes at most one provider call for each Attempt.
-- Failure and lease expiry never re-enqueue or redeliver the generation command.
-- A late Worker response cannot overwrite an expired or failed job.
+- Failure and lease expiry never return an Attempt to `queued`.
+- A late Worker response cannot overwrite an expired or failed Attempt.
 - The fake provider runs without external credentials.
 - The OpenAI adapter uses `gpt-image-2-2026-04-21` through `/v1/images/edits`, sends all 1 to 5 photos, requests one `medium`-quality `1808x1200` PNG, and receives its API key only from a server-side Secret.
 - The OpenAI SDK is configured with `max_retries=0`; no other transport layer retries the request.

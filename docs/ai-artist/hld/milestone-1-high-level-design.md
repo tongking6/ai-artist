@@ -12,7 +12,7 @@
 
 ## 1. Executive Summary
 
-M1 is a narrow website-first workflow. A user creates a `Task`, uploads 1 to 5 photos, and provides a title, note, and style. The system creates one or more immutable generation `Attempt`s, each with a complete input snapshot and an optional refinement note. Each successful Attempt produces exactly one `1800x1200` postcard PNG.
+M1 is a narrow website-first workflow. A user creates a `Task`, uploads 1 to 5 photos, and provides a title, note, and style. The system creates one or more immutable generation `Attempt`s, each with a complete input snapshot. Attempt 1 has no refinement note; every later Attempt requires one. Each successful Attempt produces exactly one `1800x1200` postcard PNG.
 
 M1 proves the intake -> upload -> asynchronous generation -> status -> download loop on a home Linux server running a single-node Kubernetes cluster. It is accessible only from the trusted home LAN. AI inference runs through the OpenAI Image API; the home server does not host a model. M1 intentionally does not implement a product pack, rights workflow, automated QA gate, packaging, accounts, payments, marketplace publishing, POD, NFT, email delivery, public Internet access, or high availability.
 
@@ -33,10 +33,10 @@ Implementation details and field-level contracts are owned by [LLD-00](../lld/mi
 | Provider | OpenAI Image API with `gpt-image-2-2026-04-21`; deterministic fake provider for tests |
 | Runtime | Single-node Kubernetes on a home Linux server |
 | Network exposure | Trusted home LAN only; no public ingress or router port forwarding |
-| Async delivery | PostgreSQL-backed job queue; one claim and no automatic retry per Attempt |
-| Customer access | Task-link bearer token, valid for 30 days |
+| Async delivery | Queued Attempt rows in PostgreSQL; one claim and no automatic retry per Attempt |
+| Customer access | Trusted home LAN; no application login or Task token in Phase 1 |
 | Data cleanup | No application-data cleanup, archive, or complex recovery in M1 |
-| Failed-job retention | 14 days |
+| Attempt retention | No automatic cleanup |
 | Availability | Single-node, best-effort; no HA requirement |
 
 ## 3. Goals And Non-Goals
@@ -82,7 +82,7 @@ Task status:
 
 Attempt status:
 
-- `queued`: generation command is waiting in the PostgreSQL-backed job queue.
+- `queued`: the Attempt is waiting for the Generation Worker to claim it from PostgreSQL.
 - `generating`: the Generation Worker owns the Attempt.
 - `ready`: postcard artifact is available.
 - `failed`: generation failed; the failed Attempt is terminal and the user may create a new refinement Attempt.
@@ -98,8 +98,7 @@ flowchart LR
   API --> DB[PostgreSQL]
   API --> O
   U -->|short-lived upload| O
-  API --> Q[PostgreSQL Job Table]
-  Q --> GW[Generation Worker Deployment]
+  DB --> GW[Generation Worker Deployment]
   GW --> P[OpenAI Image API]
   GW --> O
   GW --> DB
@@ -111,24 +110,24 @@ Runtime responsibilities:
 | Component | Responsibility |
 | --- | --- |
 | LAN-only Ingress + Website Deployment | Serve the website only to trusted home-network clients. |
-| Backend API Deployment | Create Tasks, issue upload/download links, validate input, create Attempts, return status, and enqueue generation jobs. |
-| PostgreSQL | Store Task, Asset, Attempt, Artifact, and durable job metadata. |
-| Private S3-compatible object store | Store source uploads, Attempt snapshots, and postcard artifacts on persistent storage. |
-| Generation Worker Deployment | Claim durable jobs and call the configured external AI provider over outbound HTTPS. |
+| Backend API Deployment | Create Tasks, issue upload/download links, validate input, create queued Attempts, and return status. |
+| PostgreSQL | Store the four normative tables; Attempt rows also provide the durable queue. |
+| Private S3-compatible object store | Store source uploads and postcard artifacts on persistent storage. |
+| Generation Worker Deployment | Claim queued Attempts and call the configured external AI provider over outbound HTTPS. |
 | Kubernetes/container logs | Provide basic runtime and failure visibility without a complex observability stack. |
 
 ## 6. Primary Runtime Flow
 
-1. The browser creates a draft Task and receives a one-time raw Task token.
+1. The browser creates a draft Task and receives its `task_id`.
 2. The user adds one or more JPEG/PNG photos; the browser requests slots for that batch and uploads directly to the private S3-compatible object store.
 3. The browser confirms each upload; the backend validates stored object metadata. The user may repeat this step one photo or one batch at a time.
 4. The user selects `Done adding photos`; the backend validates title, note, style, 1–5 uploaded Assets, and no pending slots, then sets the Task to `ready`.
-5. `Generate` creates Attempt 1 with a complete immutable snapshot and status `queued`.
-6. The backend atomically persists the Attempt and its `StartGenerationCommand` job in PostgreSQL.
-7. The Generation Worker claims the job once, calls the OpenAI `gpt-image-2-2026-04-21` adapter once, normalizes the provider image to the fixed postcard dimensions, performs minimum output verification, writes Artifact metadata, and directly updates the Attempt to `ready` or `failed`.
+5. `Generate` calls the common Attempt-creation endpoint and creates Attempt 1 with a complete immutable snapshot and status `queued`.
+6. The backend atomically inserts the queued Attempt with fixed provider/model and updates `tasks.current_attempt_id` in PostgreSQL.
+7. The Generation Worker claims the Attempt once, calls the OpenAI `gpt-image-2-2026-04-21` adapter once, normalizes the provider image to the fixed postcard dimensions, performs minimum output verification, writes Artifact metadata, and directly updates the Attempt to `ready` or `failed`.
 8. The browser polls Task metadata or Attempt history.
 9. For a ready Artifact, the backend returns only a short-lived presigned download URL.
-10. A refinement submits only `refinement_note` and creates a later Attempt after no Attempt is `queued` or `generating`.
+10. A refinement calls the same Attempt-creation endpoint with only `refinement_note` and creates a later Attempt after no Attempt is `queued` or `generating`.
 
 ## 7. Data And Artifact Boundaries
 
@@ -138,7 +137,7 @@ A Task owns immutable base input: 1 to 5 photo asset references, title, note, st
 
 ### Attempt
 
-An Attempt owns one complete snapshot of the Task input plus `refinement_note`. `attempt_id` is the only generation execution identity. M1 does not introduce `generation_job_id`, `generation_version`, or freshness identifiers.
+An Attempt owns one complete snapshot of the Task input plus a nullable `refinement_note`: null for Attempt 1 and required for later Attempts. `attempt_id` is the only generation execution identity. M1 does not introduce `generation_job_id`, `generation_version`, or freshness identifiers.
 
 ### Artifact
 
@@ -159,8 +158,8 @@ Storage references remain internal. Customer APIs expose artifact metadata and, 
 - The router must not expose the application through port forwarding, UPnP, a public tunnel, or a public load balancer in Phase 1.
 - Private object storage is not anonymously readable and uses persistent storage with host-level access restricted to the runtime administrator.
 - The browser never chooses object keys.
-- Task-scoped APIs require the Task bearer token; the token is valid for 30 days from Task creation.
-- Tokens are sent only in the `Authorization` header and are never logged or accepted in query strings, paths, cookies, or request bodies.
+- Phase 1 has no application-layer account, login, or Task-token authentication. Any device admitted to the trusted home LAN can call the customer API.
+- `task_id` is a resource identifier, not an authorization credential. Authentication and authorization must be added before any future public exposure.
 - Uploads accept only JPEG/PNG, up to 20 MB per photo and 5 photos per Task.
 - Upload and download URLs have a default TTL of 15 minutes.
 - `OPENAI_API_KEY` is a server-side Kubernetes Secret, is never committed or returned to the browser, and is available only to the Generation Worker.
@@ -181,7 +180,7 @@ The reconciled LLD set is the implementation source of truth:
 
 1. LLD-00: Next.js/React/TypeScript frontend and Python backend foundation.
 2. LLD-02: Task/Asset/Attempt persistence and customer APIs.
-3. LLD-05: LAN-only home Kubernetes runtime, PostgreSQL, private object storage, single-delivery jobs, secrets, and security.
+3. LLD-05: LAN-only home Kubernetes runtime, PostgreSQL, private object storage, single-delivery Attempt claiming, secrets, and security.
 4. LLD-01: website intake, upload, status, refinement, and download UX.
 5. LLD-03: OpenAI generation, deterministic fake-provider tests, normalization, and minimum verification.
 6. End-to-end verification for one-photo, five-photo, refinement, terminal failure, and artifact download flows.

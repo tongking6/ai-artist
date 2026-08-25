@@ -1,4 +1,4 @@
-# AI Artist M1 LLD-05: Home Kubernetes Runtime, Storage, Security, and Retention
+# AI Artist M1 LLD-05: Home Kubernetes Runtime, Storage, Security, and Attempt Queue
 
 ## Document Control
 
@@ -8,7 +8,7 @@
 | Product milestone | M1: Memory Product Pack Agent |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
 | Status | Implementation-ready draft |
-| Scope owner | Home Kubernetes runtime, private storage, `Task`-link security, single-delivery generation jobs, OpenAI access, and retention |
+| Scope owner | Home Kubernetes runtime, LAN access boundary, private storage, queued-Attempt delivery, OpenAI access, and retention |
 
 ## Purpose
 
@@ -23,12 +23,12 @@ AWS remains a possible later deployment target. M1 domain contracts must therefo
 - Single-node Kubernetes runtime on a home Linux server.
 - LAN-only website, API, and object upload/download access.
 - Website, Backend API, and Generation Worker Deployments.
-- PostgreSQL Task/Attempt metadata and durable generation jobs.
+- PostgreSQL Task/Asset/Attempt/Artifact metadata and durable queued Attempts.
 - Private S3-compatible object storage, with MinIO as the default Phase 1 implementation.
 - Short-lived upload/download constraints.
 - Kubernetes Secret handling for `OPENAI_API_KEY`.
-- Basic container logging and failed-job visibility.
-- Failed-job retention.
+- Basic container logging and failed-Attempt visibility.
+- Attempt retention with no automatic cleanup.
 - Minimum persistence and backup posture for private photos and generated artifacts.
 
 ## Out Of Scope
@@ -52,7 +52,7 @@ flowchart LR
   API --> DB["PostgreSQL StatefulSet"]
   API --> OS
   U -->|short-lived upload| OS
-  DB -->|durable generation job| GW["Generation Worker Deployment"]
+  DB -->|queued Attempt| GW["Generation Worker Deployment"]
   GW --> OS
   GW --> DB
   GW -->|outbound HTTPS| P["OpenAI Image API"]
@@ -65,19 +65,19 @@ Phase 1 components are:
 | --- | --- | --- |
 | LAN Ingress | Existing Ingress controller | Route the private LAN hostname to the website, API, and object-store data endpoint. |
 | Website | `Deployment` + `Service`, one replica | Serve the static frontend and browser-safe runtime configuration. |
-| Backend API | `Deployment` + `Service`, one replica | Own customer APIs, Task tokens, metadata validation, object links, Attempt creation, and job enqueueing. |
-| PostgreSQL | `StatefulSet` + `PersistentVolumeClaim`, one replica | Store Task, Asset, Attempt, Artifact, and durable job records. |
-| Object store | MinIO or compatible `StatefulSet` + `PersistentVolumeClaim`, one replica | Store source uploads, immutable input snapshots, and postcard artifacts. |
-| Generation Worker | `Deployment`, one replica | Claim generation jobs, call the configured external provider, verify output, and finalize Attempt state. |
+| Backend API | `Deployment` + `Service`, one replica | Own customer APIs, metadata validation, object links, and queued Attempt creation. |
+| PostgreSQL | `StatefulSet` + `PersistentVolumeClaim`, one replica | Store the four normative tables; queued Attempt rows are the durable work queue. |
+| Object store | MinIO or compatible `StatefulSet` + `PersistentVolumeClaim`, one replica | Store source uploads and postcard artifacts. |
+| Generation Worker | `Deployment`, one replica | Claim queued Attempts, call the configured external provider, verify output, and finalize Attempt state. |
 
 All workloads run in one `ai-artist` namespace. Phase 1 assumes planned downtime during node, cluster, database, object-store, or application maintenance.
 
 ## LAN Access Boundary
 
-The default Task link is:
+The default Task route is:
 
 ```text
-https://ai-artist.home.arpa/task/{task_id}#access_token={task_access_token}
+https://ai-artist.home.arpa/tasks/{task_id}
 ```
 
 Deployment rules:
@@ -87,44 +87,43 @@ Deployment rules:
 - The home router must not forward application ports from the Internet.
 - UPnP exposure, a public tunnel, and a public `LoadBalancer` address are prohibited in Phase 1.
 - Use a private LAN hostname. `ai-artist.home.arpa` is the documentation default; the actual hostname is a deployment parameter.
-- Task tokens and private photos require HTTPS. A private CA or locally trusted certificate may be used; public certificate automation is not required.
+- Private photos should use HTTPS. A private CA or locally trusted certificate may be used; public certificate automation is not required.
 - The object-store data endpoint used by presigned URLs must be reachable from LAN clients through the same private access boundary.
 - The object-store administration console remains cluster-internal and is not exposed through Ingress.
 
-## Metadata And Durable Job Storage
+## Metadata And Durable Attempt Queue
 
-PostgreSQL stores Task, Asset, Attempt, Artifact, and generation-job records. Domain repositories hide SQL details from LLD-01, LLD-02, and LLD-03.
+PostgreSQL stores exactly the four normative LLD-02 tables: `tasks`, `assets`, `attempts`, and `artifacts`. Domain repositories hide SQL details from LLD-01 and LLD-03. M1 has no `generation_jobs` table or command/outbox record.
 
-Attempt creation and job enqueueing occur in one database transaction:
+Attempt creation occurs in one database transaction:
 
-1. LLD-02 validates that no Attempt is `queued` or `generating` for the Task.
-2. LLD-02 writes the immutable Attempt and sets its status to `queued`.
-3. LLD-02 writes one durable `StartGenerationCommand` job with the same `attempt_id` and idempotency key.
-4. The transaction commits both records or neither record.
+1. LLD-02 locks the Task and validates that it has no Attempt in `queued` or `generating`.
+2. LLD-02 inserts the immutable Attempt with status `queued` and fixed provider/model.
+3. LLD-02 updates `tasks.current_attempt_id` to the new Attempt.
+4. The transaction commits both writes or neither write.
 
-The internal job record supports:
+The Worker claims the oldest queued Attempt with:
 
-```text
-available
-leased
-completed
-failed
+```sql
+SELECT attempt_id
+FROM attempts
+WHERE status = 'queued'
+ORDER BY created_at, attempt_id
+FOR UPDATE SKIP LOCKED
+LIMIT 1;
 ```
 
-Minimum internal fields are `job_id`, `attempt_id`, `idempotency_key`, `command_json`, `status`, `lease_token`, `lease_expires_at`, `failure_code`, `created_at`, and `updated_at`. `lease_token`, `lease_expires_at`, and `failure_code` are nullable outside their applicable states. There is no delivery-count or next-retry field in M1.
+In the same transaction, it conditionally changes `queued -> generating`, creates an unguessable `lease_token`, sets `started_at`, and sets `lease_expires_at` to 10 minutes after claim.
 
-Job delivery rules:
+Attempt delivery rules:
 
-- The Worker claims one available job atomically, creates an unguessable `lease_token`, and records a lease expiry.
-- The M1 lease is 10 minutes and the provider call timeout is 8 minutes.
-- A job may transition only `available -> leased -> completed` or `available -> leased -> failed`.
-- M1 never automatically re-enqueues or redelivers a claimed job. There is exactly one delivery and at most one provider call per Attempt.
-- Provider, storage, normalization, or verification failure moves the leased job and its Attempt to `failed` in one transaction.
-- A Worker startup sweep and 60-second periodic sweep mark expired `leased` jobs and their Attempts `failed`; neither path returns a job to `available`.
-- Completion is a conditional transaction requiring job status `leased`, the matching `lease_token`, an unexpired lease, and Attempt status `generating`.
-- If the provider returns after the lease expires or after terminal failure, the Worker discards the response and cannot write Artifact metadata or set the Attempt to `ready`.
-- Failed jobs are retained for 14 days with a customer-safe reason.
-- Job IDs and SQL row IDs are runtime details, not customer or cross-LLD domain identities.
+- The provider call timeout is 8 minutes, shorter than the 10-minute Attempt lease.
+- M1 makes at most one provider call per Attempt and never changes a failed or expired Attempt back to `queued`.
+- Provider, storage, normalization, or verification failure moves the claimed Attempt to `failed` with a customer-safe `failure_code`.
+- A Worker startup sweep and 60-second periodic sweep mark expired `generating` Attempts `failed`; they clear lease fields and never requeue the Attempt.
+- Ready finalization requires status `generating`, the matching `lease_token`, and an unexpired lease. It inserts the Artifact and changes the Attempt to `ready` in one PostgreSQL transaction.
+- If the provider returns after lease expiry or terminal failure, the conditional update fails and the Worker discards the response.
+- There is no delivery-count, retry-count, next-retry, job ID, or command JSON field in M1.
 
 ## Private Object Storage
 
@@ -136,21 +135,20 @@ tasks/{task_id}/
     {asset_id}.{normalized_ext}
   attempts/
     {attempt_id}/
-      input.json
       postcard.png
 ```
 
 Rules:
 
-- `input.json` is the immutable Attempt input snapshot.
+- The immutable Attempt input snapshot lives only in PostgreSQL `attempts.input_snapshot`.
 - `postcard.png` is the only M1 customer artifact.
 - The browser never chooses object keys.
 - The object store is not anonymously readable or listable.
-- Source uploads, snapshots, and artifacts live on a persistent volume outside container filesystems.
+- Source uploads and artifacts live on a persistent volume outside container filesystems.
 - Presigned upload and download URLs default to a 15-minute TTL.
-- Presigned URLs use a LAN-reachable object-store endpoint and are never stored in PostgreSQL.
+- Presigned URLs use a LAN-reachable object-store endpoint and are never stored in PostgreSQL. Each Asset stores only the matching `upload_url_expires_at` timestamp.
 - The Backend API verifies stored media type and size before marking an Asset `uploaded`.
-- Never issue customer URLs for source photos or `input.json`.
+- Never issue customer download URLs for source photos.
 - Never return internal object keys through customer APIs.
 
 MinIO is the default Phase 1 implementation because it provides the required S3-compatible object API. Application code depends on an `ObjectStore` boundary rather than MinIO-specific admin APIs so the storage implementation can change later.
@@ -172,28 +170,18 @@ Phase 1 rules:
 
 The server requires outbound DNS and HTTPS access to the selected provider. No inbound connection from the provider is required.
 
-## `Task`-Link Security
-
-API transport remains:
-
-```text
-Authorization: Bearer <task_access_token>
-```
+## Phase 1 Application Access
 
 Rules:
 
-- Store only a Task token hash or HMAC.
-- Never accept tokens in query strings, URL paths, cookies, or request bodies.
-- Never put tokens in logs, analytics, or `localStorage`.
-- Prefer memory; `sessionStorage` is allowed only for page refresh.
-- `task_id` alone grants no access.
-- The token authorizes only the associated Task.
-- The token is valid for 30 days from Task creation.
-- Lost links require a new Task in M1.
+- Phase 1 has no application-layer account, login, Task token, or `Authorization` header.
+- Any device admitted to the trusted home LAN can call the customer API and open a known Task route.
+- `task_id` is a resource identifier, not an authorization credential.
 - Task, status, and download responses use `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 - M1 Task routes load no analytics pixels, tag managers, chat widgets, external fonts, or unnecessary third-party scripts.
+- Authentication and authorization must be designed before any public Internet or future AWS-facing exposure.
 
-LAN-only access reduces exposure but does not replace Task authorization, upload validation, secret handling, or log redaction.
+The LAN boundary is an explicit Phase 1 simplification. It does not replace upload validation, private object storage, provider-secret handling, or log redaction.
 
 ## Secrets And Workload Boundaries
 
@@ -206,14 +194,14 @@ Rules:
 - The Backend API does not need provider API keys unless a later contract explicitly requires it.
 - Only the Generation Worker receives `OPENAI_API_KEY`.
 - Kubernetes Secret values are sensitive even though their manifest encoding may be base64; restrict namespace RBAC and host access accordingly.
-- Logs must not include keys, bearer tokens, presigned URLs, raw photos, full prompts, or unnecessary private notes.
+- Logs must not include keys, presigned URLs, raw photos, full prompts, or unnecessary private notes.
 
 Minimum workload access:
 
 | Workload | Allowed access |
 | --- | --- |
 | Website | Browser-safe runtime config only; no database, object-store credentials, or AI-provider secrets. |
-| Backend API | Task metadata, upload/download URL creation, and durable job enqueueing. |
+| Backend API | Task metadata, upload/download URL creation, and queued Attempt creation. |
 | Generation Worker | Read Attempt inputs/source uploads, call the selected provider, write the current Attempt output, and update the current Attempt. |
 | PostgreSQL | Cluster-internal access from Backend API and Generation Worker only. |
 | Object store | Cluster-internal service plus LAN-only presigned data access; admin console remains internal. |
@@ -241,10 +229,8 @@ Backend and storage configuration:
 | AI_ARTIST_PRIVATE_BUCKET | Private object-store bucket. |
 | AI_ARTIST_UPLOAD_URL_TTL_SECONDS | Fixed at 900 seconds by default. |
 | AI_ARTIST_DOWNLOAD_URL_TTL_SECONDS | Fixed at 900 seconds by default. |
-| AI_ARTIST_TASK_TOKEN_TTL_SECONDS | Fixed at 2592000 seconds by default. |
-| AI_ARTIST_JOB_LEASE_SECONDS | Fixed at 600 seconds for M1. |
-| AI_ARTIST_JOB_RECONCILE_INTERVAL_SECONDS | Fixed at 60 seconds for M1. |
-| AI_ARTIST_FAILED_JOB_RETENTION_DAYS | Fixed at 14 days for M1. |
+| AI_ARTIST_ATTEMPT_LEASE_SECONDS | Fixed at 600 seconds for M1. |
+| AI_ARTIST_ATTEMPT_RECONCILE_INTERVAL_SECONDS | Fixed at 60 seconds for M1. |
 
 Generation Worker configuration:
 
@@ -263,7 +249,7 @@ Generation Worker configuration:
 Keep only:
 
 - Backend API and Generation Worker container logs.
-- PostgreSQL durable job status and failed-job count.
+- PostgreSQL queued/generating/failed Attempt counts and expired-lease queries.
 - Kubernetes Pod restart and readiness state.
 - Generation failure logs with `task_id`, `attempt_id`, safe failure category, and provider correlation ID when available.
 
@@ -279,7 +265,7 @@ Before using irreplaceable household photos:
 - Back up PostgreSQL and the private object-store data to a separate disk or another non-cluster location.
 - Verify at least one restore procedure before treating the system as durable storage.
 
-M1 does not implement application-data cleanup, archive tiers, or automatic disaster recovery. Task tokens expire 30 days after Task creation. Failed job records are retained for 14 days. Absence of HA does not remove the need to protect private photos or API keys.
+M1 does not implement application-data cleanup, archive tiers, or automatic disaster recovery. Task metadata, failed Attempts, private photos, and Artifacts remain until a later explicit cleanup workflow exists. Absence of HA does not remove the need to protect private photos or API keys.
 
 ## Future AWS Deployment
 
@@ -289,10 +275,10 @@ A future AWS implementation may replace runtime adapters with managed services, 
 
 - Customer API paths and payloads.
 - `Task`, `Asset`, `Attempt`, and `Artifact` identities and status rules.
-- The immutable `input.json` contract and object-key layout.
-- `StartGenerationCommand` and single-delivery, terminal-failure semantics.
+- The immutable `attempts.input_snapshot` contract and object-key layout.
+- Queued-Attempt single-delivery and terminal-failure semantics.
 - The `GenerationProvider` boundary.
-- Task-token, privacy, and log-redaction rules.
+- Privacy, private-storage, and log-redaction rules. Authentication and authorization are a required new boundary before public exposure.
 
 Kubernetes resource names, PostgreSQL row IDs, MinIO-specific APIs, AWS ARNs, SQS receipt handles, and Lambda invocation IDs must not appear in domain or customer contracts.
 
@@ -301,17 +287,17 @@ Kubernetes resource names, PostgreSQL row IDs, MinIO-specific APIs, AWS ARNs, SQ
 - The website and APIs are reachable from the trusted home LAN and are not reachable through the home router's public interface.
 - No public tunnel, public DNS dependency, or Internet-facing load balancer is required.
 - Website, Backend API, Generation Worker, PostgreSQL, and object storage run on a single Kubernetes node with one replica each.
-- PostgreSQL atomically persists each Attempt and its durable generation job.
-- Each Attempt receives at most one job delivery and one provider call.
+- PostgreSQL atomically persists each queued Attempt and updates `tasks.current_attempt_id`; no generation-job table exists.
+- Each Attempt receives at most one claim and one provider call.
 - The OpenAI SDK and surrounding transport are configured for zero provider-call retries.
-- Lease expiry marks the job and Attempt failed without redelivery, and conditional finalization rejects late Worker responses.
-- Failed jobs remain inspectable for 14 days.
+- Lease expiry marks the Attempt failed without requeue, and conditional finalization rejects late Worker responses.
+- Failed Attempts remain inspectable with no automatic cleanup.
 - Private object storage uses persistent storage and does not allow anonymous reads or listing.
 - Upload/download URLs are short-lived and use a LAN-reachable object-store endpoint.
 - `OPENAI_API_KEY` exists only in a server-side Secret available to the Generation Worker and never reaches the browser or repository.
 - AI generation uses outbound provider APIs; no foundation model runs on the home server.
 - The UI or operator documentation makes the external-provider data boundary clear before non-fixture use.
-- Logs do not expose secrets, Task tokens, signed URLs, raw photos, full prompts, or unnecessary private content.
+- Logs do not expose secrets, signed URLs, raw photos, full prompts, or unnecessary private content.
 - Node restarts and planned downtime are accepted; HA and automatic failover are not required.
 - The application contracts remain portable to a possible future AWS runtime.
 

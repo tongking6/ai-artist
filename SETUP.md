@@ -22,8 +22,9 @@ Phase 1 runs on a home Linux server with a single-node Kubernetes cluster.
 
 - Access is limited to trusted devices on the home LAN.
 - Do not configure router port forwarding, UPnP exposure, a public tunnel, public DNS, or an Internet-facing load balancer.
-- Use a private LAN hostname and a locally trusted HTTPS certificate for Task tokens and photo transfer.
+- Use a private LAN hostname and a locally trusted HTTPS certificate for photo transfer.
 - High availability and automatic failover are not required.
+- Phase 1 has no application-layer login or Task-token authentication; trusted home-LAN access is the application boundary.
 - AI inference uses the outbound OpenAI Image API. The home server does not host a foundation model.
 - Keep original photos outside AI Artist and back up PostgreSQL and private object storage before relying on the system for irreplaceable household photos.
 
@@ -86,7 +87,7 @@ Do not commit real `.env` files, API keys, database credentials, or Kubernetes S
 - Provider SDK: official OpenAI Python SDK.
 - Image normalization: Pillow.
 
-The OpenAI adapter sends all 1 to 5 photos through `/v1/images/edits`, requests one `1808x1200` PNG, and center-crops 4 pixels from each horizontal edge to produce the fixed `1800x1200` artifact. Construct the official Python client with `OpenAI(max_retries=0, timeout=480.0)` and do not add transport retries. M1 does not automatically retry a claimed generation job.
+The OpenAI adapter sends all 1 to 5 photos through `/v1/images/edits`, requests one `1808x1200` PNG, and center-crops 4 pixels from each horizontal edge to produce the fixed `1800x1200` artifact. Construct the official Python client with `OpenAI(max_retries=0, timeout=480.0)` and do not add transport retries. M1 does not automatically retry or requeue a claimed Attempt. Both initial generation and refinement use `POST /v1/tasks/{task_id}/attempts`.
 
 ## M1 Product Settings
 

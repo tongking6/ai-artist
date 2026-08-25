@@ -114,7 +114,7 @@ Because the target user is not an engineer. The UI is the Phase 1 product experi
 - Photo upload and travel-memory notes.
 - Usage intent and rights confirmation.
 - Pack tier selection.
-- Durable Task/Attempt workflow and immutable `input.json` contract.
+- Durable Task/Attempt workflow and immutable PostgreSQL `input_snapshot` contract.
 - Customer-facing postcard PNG download.
 - OpenAI Image API generation with `gpt-image-2-2026-04-21` through a server-side API credential.
 - Fake-provider or fixture-based smoke test for repeatable verification.

@@ -23,8 +23,7 @@ The website is not a marketplace, account portal, operator dashboard, or generic
 - Guided intake for 1 to 5 photos.
 - Upload UI using backend-issued upload slots.
 - `title`, `note`, and `style` collection.
-- Generate action that creates Attempt 1.
-- Refinement action that accepts only `refinement_note`.
+- Attempt creation for both initial generation and later refinement through one API endpoint.
 - Task input status and current attempt status.
 - Attempt history view.
 - Delivery of a fixed-dimension postcard PNG artifact.
@@ -99,7 +98,7 @@ UX requirements:
 - Provide a `Done adding photos` action that calls the complete-intake API.
 - Expire stale upload slots gracefully.
 - Let the user retry a failed upload with a fresh backend-issued slot.
-- Do not expose private bucket names, object keys, signed URL query strings, or task tokens.
+- Do not expose private bucket names, object keys, or signed URL query strings.
 
 ### Generate And Refine
 
@@ -109,7 +108,7 @@ The Generate screen is available after complete-intake succeeds and the Task is 
 - Title, note, and style.
 - Expected fixed-dimension postcard PNG output.
 
-The first `Generate` action creates Attempt 1. A later refinement action accepts only `refinement_note` and creates a new attempt after the current attempt is `ready` or `failed`.
+Both actions call `POST /v1/tasks/{task_id}/attempts`. The first `Generate` action sends `{}` and creates Attempt 1. A later refinement sends only `refinement_note` and creates a new Attempt after the current Attempt is `ready` or `failed`.
 
 Only one attempt may be `queued` or `generating` for a task at a time.
 
@@ -153,29 +152,22 @@ Rules:
 - Refresh expired download links through the artifact download API.
 - Do not place raw presigned URLs in copy, logs, or emails.
 
-## Task-Link Security UX
+## Phase 1 LAN Access UX
 
-Default delivery is task-link-only.
+Phase 1 relies on the trusted home LAN and has no application-layer login or Task token.
 
-The task link format is:
+The Task route is:
 
 ```text
-https://ai-artist.home.arpa/task/{task_id}#access_token={task_access_token}
-```
-
-The frontend extracts the URL fragment and sends the token only in:
-
-```http
-Authorization: Bearer <task_access_token>
+https://ai-artist.home.arpa/tasks/{task_id}
 ```
 
 Rules:
 
-- Prefer in-memory token storage.
-- `sessionStorage` is acceptable only to survive refresh.
-- `localStorage` is prohibited.
-- Do not put tokens in query strings, paths, cookies, analytics, or visible support copy.
-- If the link is lost, the customer must start a new task.
+- The frontend does not implement login, token storage, or an `Authorization` header.
+- Any trusted LAN device with a Task URL can open that Task.
+- `task_id` is a resource identifier, not an authorization credential.
+- Public exposure is prohibited until authentication and authorization are designed.
 
 ## Customer-Safe Copy Rules
 
@@ -193,9 +185,9 @@ Rules:
 
 LLD-01 depends on:
 
-- LLD-02 for task creation, upload slots, input validation, task status, attempt creation, status metadata, token validation, attempt history, and artifact download links.
+- LLD-02 for task creation, upload slots, input validation, task status, attempt creation, status metadata, attempt history, and artifact download links.
 - LLD-03 for artifact generation and readiness metadata.
-- LLD-05 for LAN access, task-link constraints, browser-safe runtime config, no-store/cache/referrer policy requirements, and private storage.
+- LLD-05 for the LAN access boundary, browser-safe runtime config, no-store/cache/referrer policy requirements, and private storage.
 
 LLD-01 provides:
 
@@ -208,10 +200,10 @@ LLD-01 provides:
 - A user can create a draft, upload 1 to 5 photos, enter title/note/style, and reach task status `ready`.
 - The user can add photos one at a time or in batches before completing intake.
 - Each selected file is represented by the LLD-02 manifest and matched to its upload slot through `client_file_id`.
-- The first Generate action creates Attempt 1.
-- A refinement submits only `refinement_note` and creates a later attempt only when no attempt is queued or generating.
+- Initial generation sends `{}` to `POST /v1/tasks/{task_id}/attempts` and creates Attempt 1.
+- A refinement uses the same endpoint, submits only `refinement_note`, and creates a later Attempt only when no Attempt is queued or generating.
 - The UI does not expose internal artifacts or private storage details.
-- Task tokens use fragment-to-Authorization-header transport.
+- Phase 1 frontend sends no application authentication token and remains LAN-only.
 - Status screens distinguish task status from attempt status.
 - Attempt history is viewable and previous ready artifacts remain downloadable.
 - Delivery uses a fresh short-lived artifact download URL.
