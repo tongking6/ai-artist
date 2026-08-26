@@ -182,8 +182,9 @@ Rules:
 
 - Phase 1 has no application-layer account, login, Task token, or `Authorization` header.
 - Any device permitted by the tailnet policy can call the customer API and open a known Task route.
+- Any device permitted by the tailnet policy can list every Task summary through the system-level `GET /v1/tasks` endpoint; the tailnet must therefore remain a trusted single-household boundary.
 - `task_id` is a resource identifier, not an authorization credential.
-- Task, status, and download responses use `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+- Task collection, Task detail, status, and download responses use `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 - M1 Task routes load no analytics pixels, tag managers, chat widgets, external fonts, or unnecessary third-party scripts.
 - Authentication and authorization must be designed before any public Internet or future AWS-facing exposure.
 

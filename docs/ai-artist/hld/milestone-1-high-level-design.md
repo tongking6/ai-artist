@@ -50,6 +50,7 @@ Implementation details and field-level contracts are owned by [LLD-00](../lld/mi
 - Support refinement Attempts that change only `refinement_note`.
 - Generate one postcard PNG asynchronously.
 - Expose separate Task input status and Attempt generation status.
+- Provide a private system-level Task center for asynchronous generation visibility.
 - Allow the user to inspect Attempt history and download any ready postcard artifact.
 
 ### Non-Goals
@@ -68,6 +69,7 @@ Implementation details and field-level contracts are owned by [LLD-00](../lld/mi
 Core screens:
 
 - `Start`: explain the postcard outcome and start a Task.
+- `My Projects`: list every private-studio Task, its current Attempt status, and expandable Attempt history.
 - `Guided Intake`: collect title, note, style, and 1 to 5 photos.
 - `Generate`: show the immutable base inputs and start the first Attempt.
 - `Status`: show Task status separately from current Attempt status.
@@ -117,7 +119,7 @@ Runtime responsibilities:
 
 ## 6. Primary Runtime Flow
 
-1. The browser creates a draft Task and receives its `task_id`.
+1. The browser lists existing Task summaries for `My Projects` or creates a draft Task and receives its `task_id`.
 2. The user adds one or more JPEG/PNG photos; the browser requests slots for that batch and uploads directly to the private S3-compatible object store.
 3. The browser confirms each upload; the backend validates stored object metadata. The user may repeat this step one photo or one batch at a time.
 4. The user selects `Done adding photos`; the backend validates title, note, style, 1–5 uploaded Assets, and no pending slots, then sets the Task to `ready`.
@@ -157,7 +159,7 @@ Storage references remain internal. Customer APIs expose artifact metadata and, 
 - Tailscale Serve terminates HTTPS and proxies to loopback-only K3s Traefik; Tailscale Funnel, router port forwarding, UPnP, other public tunnels, and public load balancers are prohibited in Phase 1.
 - Private object storage is not anonymously readable and uses persistent storage with host-level access restricted to the runtime administrator.
 - The browser never chooses object keys.
-- Phase 1 has no application-layer account, login, or Task-token authentication. Any device permitted by the tailnet policy can call the customer API.
+- Phase 1 has no application-layer account, login, or Task-token authentication. Any device permitted by the tailnet policy can call the customer API and list every Task summary in the private studio.
 - `task_id` is a resource identifier, not an authorization credential. Authentication and authorization must be added before any future public exposure.
 - Uploads accept only JPEG/PNG, up to 20 MB per photo and 5 photos per Task.
 - Upload and download URLs have a default TTL of 15 minutes.

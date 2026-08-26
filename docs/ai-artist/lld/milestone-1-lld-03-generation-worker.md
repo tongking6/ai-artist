@@ -145,6 +145,8 @@ generating -> failed
 
 LLD-03 must not claim an Attempt that is already `ready`, `failed`, or owned by another active execution.
 
+Every successful `queued -> generating`, `generating -> ready`, or `generating -> failed` transaction also advances the owning `tasks.updated_at`. This keeps the system Task collection ordered by current asynchronous activity without exposing provider or queue metadata.
+
 There is no automatic generation retry. A failed Attempt remains immutable and terminal. A customer may later create a distinct Attempt with a new `attempt_id` and required `refinement_note`; that is a new generation request, not a retry of the failed Attempt.
 
 ## External Provider Boundary
@@ -366,6 +368,7 @@ LLD-03 provides:
 - The worker generates exactly one `1800x1200` postcard PNG.
 - Minimum output verification runs before `Attempt.status = ready`.
 - Generation or verification failures set `Attempt.status = failed`.
+- Every Attempt lifecycle transition advances the owning `tasks.updated_at` in the same transaction.
 - The Worker makes at most one provider call for each Attempt.
 - Failure and lease expiry never return an Attempt to `queued`.
 - A late Worker response cannot overwrite an expired or failed Attempt.

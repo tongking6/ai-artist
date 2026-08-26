@@ -113,7 +113,7 @@ Global rules:
 | style | `varchar(64)` | yes | — | Style ID; M1 initially accepts `warm_handmade`. |
 | current_attempt_id | `varchar(40)` | yes | — | Attempt displayed as current for this Task. |
 | created_at | `timestamptz` | no | `now()` | Creation time. |
-| updated_at | `timestamptz` | no | `now()` | Last Task-row update. |
+| updated_at | `timestamptz` | no | `now()` | Last Task or current-Attempt lifecycle activity surfaced by the task collection. |
 
 Constraints and indexes:
 
@@ -125,6 +125,11 @@ CHECK (note IS NULL OR char_length(btrim(note)) BETWEEN 1 AND 1000)
 CHECK (style IS NULL OR char_length(btrim(style)) BETWEEN 1 AND 64)
 CHECK (status <> 'ready' OR (title IS NOT NULL AND note IS NOT NULL AND style IS NOT NULL))
 CHECK (updated_at >= created_at)
+```
+
+```sql
+CREATE INDEX tasks_activity_idx
+  ON tasks (updated_at DESC, task_id DESC);
 ```
 
 After `attempts` exists, add this ownership-preserving circular reference:
@@ -322,9 +327,9 @@ Artifact rows are inserted only after minimum verification. Row existence means 
 - Complete intake: lock the Task row, require complete metadata, 1 to 5 uploaded Assets, and no pending Assets, then set Task `ready`.
 - Create Attempt: lock the Task row, insert the queued Attempt with fixed provider/model and immutable `input_snapshot`, and update `tasks.current_attempt_id` in one transaction.
 - Snapshot photo order: write uploaded Asset IDs ordered by `(created_at, asset_id)`; M1 has no manual photo reordering.
-- Claim Attempt: atomically claim the oldest queued Attempt with `FOR UPDATE SKIP LOCKED`, set `generating`, and assign a lease token/expiry.
-- Complete Attempt: condition on `status = generating`, matching lease token, and unexpired lease; insert the Artifact and set the Attempt `ready` in one transaction.
-- Fail Attempt: condition on the matching live lease; set the Attempt `failed` with a safe failure code. Expired-lease reconciliation also sets `failed` and never requeues the Attempt.
+- Claim Attempt: atomically claim the oldest queued Attempt with `FOR UPDATE SKIP LOCKED`, set `generating`, assign a lease token/expiry, and advance the owning `tasks.updated_at` in the same transaction.
+- Complete Attempt: condition on `status = generating`, matching lease token, and unexpired lease; insert the Artifact, set the Attempt `ready`, and advance the owning `tasks.updated_at` in one transaction.
+- Fail Attempt: condition on the matching live lease; set the Attempt `failed` with a safe failure code and advance the owning `tasks.updated_at`. Expired-lease reconciliation does the same and never requeues the Attempt.
 
 ## Customer Response Models
 
@@ -434,6 +439,46 @@ Task rules:
 - After any Attempt exists, these base inputs are immutable.
 - Rights, copyright, and amendment workflows are not part of this first version.
 
+### `AttemptSummaryView`
+
+```json
+{
+  "attempt_id": "att_01J...",
+  "attempt_number": 2,
+  "status": "generating",
+  "created_at": "2026-08-25T14:02:00Z",
+  "started_at": "2026-08-25T14:02:02Z",
+  "completed_at": null
+}
+```
+
+This compact model is used only inside the Task collection. It does not include `refinement_note`, `failure_code`, Artifact metadata, or any provider/internal field.
+
+### `TaskSummaryView`
+
+```json
+{
+  "task_id": "task_01J...",
+  "status": "ready",
+  "title": "Spring Walk in Kyoto",
+  "style": "warm_handmade",
+  "photo_count": 3,
+  "attempt_count": 2,
+  "current_attempt": {
+    "attempt_id": "att_01J...",
+    "attempt_number": 2,
+    "status": "generating",
+    "created_at": "2026-08-25T14:02:00Z",
+    "started_at": "2026-08-25T14:02:02Z",
+    "completed_at": null
+  },
+  "created_at": "2026-08-25T13:55:00Z",
+  "updated_at": "2026-08-25T14:02:02Z"
+}
+```
+
+`current_attempt` is an `AttemptSummaryView` or `null`. The collection intentionally omits the creative note, photo metadata, refinement notes, failure code, and Artifact details. Full customer-safe state remains available through the existing per-Task endpoints.
+
 ## Phase 1 Tailscale Access Model
 
 Task route:
@@ -446,6 +491,7 @@ Rules:
 
 - Phase 1 has no application-layer login, Task token, or `Authorization` header.
 - Any device permitted by the tailnet policy can call the customer API and open a known Task route.
+- Any device permitted by the tailnet policy can list every Task summary through `GET /v1/tasks`; Phase 1 has no per-user filtering.
 - `task_id` is a resource identifier, not an authorization credential.
 - Nested Asset and Artifact routes still require the resource to belong to the path Task; missing and cross-Task resources both return the same `404` code.
 - Authentication and authorization must be designed before any public Internet or future AWS-facing exposure.
@@ -669,11 +715,12 @@ LLD-03 claims and directly updates this Attempt row. M1 does not require a `Star
 
 ## Customer API Contract
 
-Phase 1 exposes nine Backend API operations. None uses application-layer authentication while the application remains inside the approved Tailscale tailnet boundary.
+Phase 1 exposes ten Backend API operations. None uses application-layer authentication while the application remains inside the approved Tailscale tailnet boundary.
 
 | API | Purpose | Success | Response |
 | --- | --- | ---: | --- |
 | `POST /v1/tasks` | Create a draft Task. | 201 | Create Task response |
+| `GET /v1/tasks` | List all Task summaries in the private studio. | 200 | Cursor-paginated Task collection |
 | `PATCH /v1/tasks/{task_id}` | Save title, note, and style. | 200 | `TaskView` |
 | `POST /v1/tasks/{task_id}/upload-slots` | Reserve Assets and return direct-upload instructions. | 200 | Upload-slots envelope |
 | `POST /v1/tasks/{task_id}/assets/{asset_id}/complete` | Validate a stored photo and mark it uploaded. | 200 | `PhotoView` |
@@ -699,6 +746,35 @@ Response:
   "status": "draft"
 }
 ```
+
+### List Tasks
+
+```http
+GET /v1/tasks?limit=25&cursor={opaque_cursor}
+```
+
+The endpoint returns all Task summaries visible inside the Phase 1 private studio. M1 has no per-user ownership filter.
+
+Response:
+
+```json
+{
+  "tasks": [],
+  "next_cursor": null
+}
+```
+
+Rules:
+
+- `limit` is optional, defaults to `25`, and accepts integers from `1` through `100`.
+- `cursor` is an opaque server-issued value. Clients return it unchanged and do not infer its contents.
+- Tasks are ordered by `(updated_at DESC, task_id DESC)`.
+- The cursor represents the last `(updated_at, task_id)` pair from the previous page so equal timestamps remain deterministic.
+- Every collection item is a `TaskSummaryView`; full Task inputs and full Attempt history are not embedded.
+- `next_cursor` is `null` when no later page exists.
+- The response uses `Cache-Control: no-store` and never includes signed URLs or internal storage/provider fields.
+- `tasks.updated_at` advances whenever Task intake changes, an Attempt is created, or the current Attempt changes lifecycle status. Those writes occur in the same transaction as the owning mutation so collection order and status do not drift.
+- A malformed, expired, or otherwise unusable cursor returns `400 invalid_cursor`; the client restarts from the first page.
 
 ### Update Task Metadata
 
@@ -912,6 +988,7 @@ LLD-02 depends on:
 LLD-02 provides:
 
 - Task input status authority.
+- Cursor-paginated system Task collection and compact current-Attempt summaries.
 - Attempt `input_snapshot` JSONB.
 - Attempt metadata.
 - Upload/download APIs.
@@ -921,6 +998,7 @@ LLD-02 provides:
 
 - Phase 1 stores no Task credential and customer APIs require no application `Authorization` header while tailnet-only.
 - Customer timestamps map PostgreSQL `timestamptz` to UTC RFC3339 strings with `Z`.
+- `GET /v1/tasks` returns every private-studio Task as a `TaskSummaryView`, ordered by `(updated_at DESC, task_id DESC)`, with opaque cursor pagination and no creative note, photo metadata, refinement note, failure code, or Artifact details.
 - `PATCH /v1/tasks/{task_id}` persists only title, note, and style before the Task is ready or any Attempt exists.
 - Task metadata validation is `title` 1–120 characters, `note` 1–1000 characters, and `style = warm_handmade`.
 - `POST /v1/tasks/{task_id}/complete-intake` requires complete metadata, 1 to 5 uploaded Assets, and zero pending slots before setting Task status to `ready`.
@@ -946,6 +1024,7 @@ LLD-02 provides:
 | Endpoint condition | HTTP status | Error code | Retryable |
 | --- | ---: | --- | --- |
 | Malformed JSON, unknown fields, or wrong field types | 400 | `invalid_request` | false |
+| Task collection cursor is malformed, expired, or unusable | 400 | `invalid_cursor` | false |
 | Task ID does not exist | 404 | `task_not_found` | false |
 | Task metadata violates length/style rules | 400 | `invalid_task_metadata` | false |
 | Task is ready or has an Attempt and receives a base-input mutation | 409 | `task_immutable` | false |

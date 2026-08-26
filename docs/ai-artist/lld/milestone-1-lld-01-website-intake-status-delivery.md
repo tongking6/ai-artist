@@ -19,6 +19,7 @@ The website is not a marketplace, account portal, operator dashboard, or generic
 ## In Scope
 
 - Tailnet-accessible product-start page.
+- System-level `My projects` task center for the private studio.
 - Draft task creation before upload.
 - Guided intake for 1 to 5 photos.
 - Upload UI using backend-issued upload slots.
@@ -30,7 +31,7 @@ The website is not a marketplace, account portal, operator dashboard, or generic
 
 ## Out Of Scope
 
-- Accounts, login, dashboards, or public galleries.
+- Accounts, login, account-scoped dashboards, or public galleries.
 - Payment, checkout, subscriptions, or usage credits.
 - Rights, copyright, or license workflows in this first version.
 - Marketplace publishing, listing drafts, POD, NFT, fulfillment, or buyer messaging.
@@ -43,6 +44,8 @@ The website is not a marketplace, account portal, operator dashboard, or generic
 ```mermaid
 flowchart LR
   Start["Start"] --> Draft["Create Draft"]
+  Start --> Projects["My Projects"]
+  Projects --> Status
   Draft --> Intake["Guided Intake"]
   Intake --> Upload["Upload 1-5 Photos"]
   Upload --> Ready["Input Ready"]
@@ -66,6 +69,23 @@ Goals:
 Customer-visible artifact:
 
 - One fixed-dimension postcard PNG.
+
+### My Projects
+
+The `/tasks` route is the system-level activity center for the private studio. It lists every Task visible inside the Phase 1 tailnet boundary, ordered by latest activity.
+
+Each Task row shows:
+
+- Task title or an `Untitled postcard` fallback.
+- Task input status.
+- Current Attempt number and status, or `Not started`.
+- Uploaded photo count, total Attempt count, and latest activity time.
+- An `Open project` action.
+- An expandable Attempt-history region loaded from `GET /v1/tasks/{task_id}/attempts`.
+
+The first page loads from `GET /v1/tasks`. Additional pages use the returned cursor. Full Attempt history is loaded only when a Task is expanded; the collection response does not include photos, the creative note, refinement notes, artifacts, or provider metadata.
+
+While a visible Task has a `queued` or `generating` current Attempt, the page refreshes that Task's status automatically. Manual collection refresh remains available. Ready artifacts may be downloaded from an expanded Attempt by requesting a fresh download URL through the existing artifact API.
 
 ### Guided Intake
 
@@ -162,10 +182,17 @@ The Task route is:
 https://tongjin-server.tail910d5f.ts.net/tasks/{task_id}
 ```
 
+The Task-center route is:
+
+```text
+https://tongjin-server.tail910d5f.ts.net/tasks
+```
+
 Rules:
 
 - The frontend does not implement login, token storage, or an `Authorization` header.
 - Any device permitted by the tailnet policy with a Task URL can open that Task.
+- Any device permitted by the tailnet policy can open `My projects` and see every Task summary in this studio. Phase 1 is therefore appropriate only for a trusted single-household tailnet.
 - `task_id` is a resource identifier, not an authorization credential.
 - Tailscale Funnel and other public exposure are prohibited until authentication and authorization are designed.
 
@@ -185,7 +212,7 @@ Rules:
 
 LLD-01 depends on:
 
-- LLD-02 for task creation, upload slots, input validation, task status, attempt creation, status metadata, attempt history, and artifact download links.
+- LLD-02 for the Task collection, task creation, upload slots, input validation, task status, attempt creation, status metadata, attempt history, and artifact download links.
 - LLD-03 for artifact generation and readiness metadata.
 - LLD-05 for the Tailscale access boundary, browser-safe runtime config, no-store/cache/referrer policy requirements, and private storage.
 
@@ -205,6 +232,8 @@ LLD-01 provides:
 - The UI does not expose internal artifacts or private storage details.
 - Phase 1 frontend sends no application authentication token and remains tailnet-only.
 - Status screens distinguish task status from attempt status.
+- `My projects` lists all studio Tasks through cursor pagination and keeps current asynchronous Attempt status visible.
+- Expanding a Task loads its complete Attempt history without placing that history in every collection item.
 - Attempt history is viewable and previous ready artifacts remain downloadable.
 - Delivery uses a fresh short-lived artifact download URL.
 - The website and its upload/download endpoints require approved tailnet access through the canonical Tailscale HTTPS origin and do not depend on public Internet ingress.
