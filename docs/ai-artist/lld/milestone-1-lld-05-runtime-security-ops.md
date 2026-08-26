@@ -16,6 +16,8 @@ LLD-05 defines the minimum Phase 1 runtime and security posture for the M1 `Task
 
 Phase 1 runs on a home Linux server with a single-node K3s cluster. The complete customer workflow is available only to authorized devices in the owner's Tailscale tailnet. LAN devices use the same Tailscale URL rather than a separate LAN ingress. The Generation Worker calls the OpenAI Image API over outbound HTTPS using a server-side API key; the home server does not run an AI model.
 
+Initial integration verification runs directly on this Linux K3s runtime with the deterministic fake provider. Provider-cost and credential-dependent checks begin only after the real Website, API, PostgreSQL, MinIO, Worker, artifact, and download flow passes through the tailnet origin.
+
 AWS remains a possible later deployment target. M1 domain contracts must therefore stay independent of Kubernetes, PostgreSQL, MinIO, and AWS-specific SDK types.
 
 ## In Scope
@@ -73,6 +75,10 @@ Phase 1 components are:
 | Generation Worker | `Deployment`, one replica | Claim queued Attempts, call the configured external provider, verify output, and finalize Attempt state. |
 
 All workloads run in one `ai-artist` namespace. Phase 1 assumes planned downtime during node, cluster, database, object-store, or application maintenance.
+
+## Initial Linux Server Verification
+
+The first native K3s deployment uses `AI_ARTIST_GENERATION_PROVIDER=fake`, `demoMode=false`, generated in-cluster PostgreSQL/MinIO credentials, and the full home storage and access topology. It must pass the real Browser -> API -> PostgreSQL/MinIO -> Worker -> Artifact -> download flow before the OpenAI provider is enabled. There is no parallel local-cluster profile or disposable local storage contract.
 
 ## Tailscale Access Boundary
 

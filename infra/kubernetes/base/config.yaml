@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-artist-config
+  namespace: ai-artist
+data:
+  AI_ARTIST_STAGE: home
+  AI_ARTIST_OBJECT_ENDPOINT: http://minio:9000
+  AI_ARTIST_OBJECT_PRESIGN_ENDPOINT: https://tongjin-server.tail910d5f.ts.net
+  AI_ARTIST_OBJECT_ADDRESSING_STYLE: path
+  AI_ARTIST_PRIVATE_BUCKET: ai-artist-private
+  AI_ARTIST_UPLOAD_URL_TTL_SECONDS: "900"
+  AI_ARTIST_DOWNLOAD_URL_TTL_SECONDS: "900"
+  AI_ARTIST_ATTEMPT_LEASE_SECONDS: "600"
+  AI_ARTIST_ATTEMPT_RECONCILE_INTERVAL_SECONDS: "60"
+  AI_ARTIST_GENERATION_PROVIDER: fake
+  AI_ARTIST_WORKER_POLL_SECONDS: "1"
+  LOG_LEVEL: INFO
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-artist-ui-runtime
+  namespace: ai-artist
+data:
+  app-config.js: |
+    window.__AI_ARTIST_CONFIG__ = Object.freeze({
+      stage: "home",
+      apiBaseUrl: "",
+      assetBaseUrl: "",
+      maxPhotos: 5,
+      demoMode: false,
+    });

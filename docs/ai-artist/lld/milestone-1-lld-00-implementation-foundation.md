@@ -36,8 +36,7 @@ Dependency versions are pinned by the implementation lockfiles when the scaffold
 ## Repository Shape
 
 ```text
-apps/
-  web/                         # Next.js + React + TypeScript
+ui/                            # Existing Next.js + React + TypeScript application
 services/
   backend/
     pyproject.toml
@@ -51,12 +50,21 @@ services/
         generation/            # OpenAI and deterministic fake providers
     migrations/                # Alembic migrations
 infra/
-  kubernetes/                  # Phase 1 manifests or templates
+  kubernetes/
+    base/                      # Shared application and data-service manifests
+    overlays/
+      home/                    # Native K3s and Tailscale-facing profile
 tests/
   e2e/                         # Browser workflow against the fake provider
 ```
 
 The scaffold may add framework-generated support files, but it must preserve these ownership boundaries. Shared Task/Attempt models live in the backend domain package rather than being duplicated between the API and Worker.
+
+The existing `ui/` directory remains the Website source root. Implementation must not create a competing `apps/web/` copy or move the verified Website solely to satisfy an older proposed repository shape.
+
+### Integration Environment
+
+Integration testing runs on the approved Linux server's native single-node K3s cluster. The first deployment uses `AI_ARTIST_GENERATION_PROVIDER=fake` and the real Website, API, PostgreSQL, MinIO, and Worker path before any OpenAI credential is introduced. macOS remains a unit, component, and mocked-browser test environment only.
 
 ## Process Boundaries
 
@@ -101,7 +109,7 @@ Implementation is not foundation-complete until:
 - The Python package passes linting/type checks selected by the scaffold and `pytest`.
 - Alembic can migrate an empty PostgreSQL database to the current schema.
 - API and Worker containers build from a clean checkout.
-- The fake-provider Playwright flow covers create Task -> upload -> complete intake -> create Attempt -> ready -> download.
+- The fake-provider Playwright flow against the Linux server covers create Task -> upload -> complete intake -> create Attempt -> ready -> download.
 - Kubernetes manifests render or validate without embedding Secret values.
 
 ## Deferred Decisions

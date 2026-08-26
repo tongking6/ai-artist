@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ai-artist-backend"
+version = "0.1.0"
+description = "AI Artist M1 customer API and generation worker"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "alembic==1.19.1",
+  "boto3==1.43.80",
+  "fastapi==0.141.1",
+  "pillow==12.3.0",
+  "psycopg[binary]==3.3.4",
+  "pydantic-settings==2.15.0",
+  "sqlalchemy==2.0.52",
+  "ulid-py==1.1.0",
+  "uvicorn[standard]==0.52.4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx==0.28.1",
+  "mypy==1.20.2",
+  "pytest==9.1.1",
+  "ruff==0.16.4",
+]
+
+[project.scripts]
+ai-artist-api = "ai_artist.app:run"
+ai-artist-worker = "ai_artist.worker:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ai_artist"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["ai_artist"]
+
+[[tool.mypy.overrides]]
+module = ["boto3", "botocore.*"]
+ignore_missing_imports = true
