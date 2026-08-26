@@ -12,7 +12,7 @@ interface DemoAsset {
   filename: string;
   mediaType: "image/jpeg" | "image/png";
   sizeBytes: number;
-  status: "pending" | "uploaded";
+  status: "pending" | "uploaded" | "expired";
   createdAt: string;
   expiresAt: string;
 }
@@ -105,6 +105,7 @@ export async function demoRequest(path: string, init: RequestInit): Promise<unkn
 
   const task = loadTask(segments[2]);
   materializeAttempts(task);
+  materializeExpiredAssets(task);
 
   if (method === "GET" && segments.length === 3) {
     saveTask(task);
@@ -136,8 +137,7 @@ export async function demoRequest(path: string, init: RequestInit): Promise<unkn
       files: DemoUploadManifestItem[];
       idempotency_key: string;
     }>(init);
-    const uploadedOrPending = task.assets.length;
-    if (!body.files?.length || uploadedOrPending + body.files.length > 5) {
+    if (!body.files?.length) {
       throw new DemoApiError(400, "invalid_upload_manifest", "Invalid demo photo batch.");
     }
 
@@ -145,7 +145,27 @@ export async function demoRequest(path: string, init: RequestInit): Promise<unkn
       (asset) => asset.uploadBatchKey === body.idempotency_key,
     );
     if (existingBatch.length > 0) {
+      const reservations = existingBatch.filter(
+        (asset) => asset.status !== "uploaded",
+      );
+      if (
+        reservations.length > 0 &&
+        reservations.every((asset) => asset.status === "expired")
+      ) {
+        throw new DemoApiError(
+          409,
+          "upload_batch_expired",
+          "Demo upload batch expired.",
+        );
+      }
       return { slots: existingBatch.map(uploadSlot) };
+    }
+
+    const uploadedOrPending = task.assets.filter(
+      (asset) => asset.status !== "expired",
+    ).length;
+    if (uploadedOrPending + body.files.length > 5) {
+      throw new DemoApiError(400, "invalid_upload_manifest", "Invalid demo photo batch.");
     }
 
     const createdAt = new Date().toISOString();
@@ -177,6 +197,9 @@ export async function demoRequest(path: string, init: RequestInit): Promise<unkn
     const asset = task.assets.find((candidate) => candidate.assetId === segments[4]);
     if (!asset) {
       throw new DemoApiError(404, "asset_not_found", "Demo photo not found.");
+    }
+    if (asset.status === "expired") {
+      throw new DemoApiError(409, "upload_slot_expired", "Demo upload slot expired.");
     }
     asset.status = "uploaded";
     task.status = "uploading";
@@ -281,6 +304,7 @@ function loadAllTasks(): DemoTask[] {
     if (!stored) continue;
     const task = JSON.parse(stored) as DemoTask;
     materializeAttempts(task);
+    materializeExpiredAssets(task);
     saveTask(task);
     tasks.push(task);
   }
@@ -305,6 +329,17 @@ function materializeAttempts(task: DemoTask) {
   if (changed) touch(task);
 }
 
+function materializeExpiredAssets(task: DemoTask) {
+  for (const asset of task.assets) {
+    if (
+      asset.status === "pending" &&
+      Date.now() >= Date.parse(asset.expiresAt)
+    ) {
+      asset.status = "expired";
+    }
+  }
+}
+
 function taskView(task: DemoTask) {
   const uploadedCount = task.assets.filter((asset) => asset.status === "uploaded").length;
   const pendingCount = task.assets.filter((asset) => asset.status === "pending").length;
@@ -315,7 +350,9 @@ function taskView(task: DemoTask) {
     title: task.title,
     note: task.note,
     style: task.style,
-    photos: task.assets.map(photoView),
+    photos: task.assets
+      .filter((asset) => asset.status !== "expired")
+      .map(photoView),
     upload_summary: {
       uploaded_count: uploadedCount,
       pending_count: pendingCount,
