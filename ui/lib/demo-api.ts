@@ -338,6 +338,14 @@ function materializeExpiredAssets(task: DemoTask) {
       asset.status = "expired";
     }
   }
+
+  const hasActiveAsset = task.assets.some(
+    (asset) => asset.status === "pending" || asset.status === "uploaded",
+  );
+  if (task.status === "uploading" && !hasActiveAsset) {
+    task.status = "draft";
+    touch(task);
+  }
 }
 
 function taskView(task: DemoTask) {

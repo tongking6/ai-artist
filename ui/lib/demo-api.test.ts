@@ -62,9 +62,21 @@ describe("localhost demo API", () => {
       originalFiles,
       "batch_original",
     );
+    const uploadingTask = await getTask(created.task_id);
+    expect(uploadingTask.status).toBe("uploading");
     expirePendingAssets(created.task_id);
 
-    await listTasks();
+    const expiredTask = await getTask(created.task_id);
+    const taskList = await listTasks();
+    expect(expiredTask).toMatchObject({
+      status: "draft",
+      photos: [],
+      upload_summary: { uploaded_count: 0, pending_count: 0, max_count: 5 },
+    });
+    expect(expiredTask.updated_at).not.toBe(uploadingTask.updated_at);
+    expect(
+      taskList.tasks.find((task) => task.task_id === created.task_id),
+    ).toMatchObject({ status: "draft", photo_count: 0 });
     expect(readStoredAssets(created.task_id)).toEqual(
       expect.arrayContaining([expect.objectContaining({ status: "expired" })]),
     );
@@ -111,6 +123,7 @@ describe("localhost demo API", () => {
     expirePendingAssets(created.task_id);
 
     await expect(getTask(created.task_id)).resolves.toMatchObject({
+      status: "uploading",
       photos: [expect.objectContaining({ client_file_id: "file_uploaded" })],
       upload_summary: { uploaded_count: 1, pending_count: 0, max_count: 5 },
     });
