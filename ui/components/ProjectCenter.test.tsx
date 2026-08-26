@@ -72,4 +72,48 @@ describe("ProjectCenter", () => {
     expect(screen.getByRole("button", { name: "Download Spring Walk in Kyoto version 2" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("reloads the first page when a pagination cursor is invalid", async () => {
+    const refreshedTask = { ...task, title: "Spring Walk in Kyoto — refreshed" };
+    const requestedUrls: string[] = [];
+    let requestNumber = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      requestNumber += 1;
+      requestedUrls.push(String(input));
+      if (requestNumber === 1) {
+        return new Response(JSON.stringify({ tasks: [task], next_cursor: "expired-cursor" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (requestNumber === 2) {
+        return new Response(JSON.stringify({
+          code: "invalid_cursor",
+          message: "Cursor expired",
+          retryable: false,
+        }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ tasks: [refreshedTask], next_cursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    render(<ProjectCenter />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Load more projects" })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Load more projects" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Spring Walk in Kyoto — refreshed" })).toBeInTheDocument(),
+    );
+    expect(requestedUrls).toHaveLength(3);
+    expect(requestedUrls[1]).toContain("cursor=expired-cursor");
+    expect(requestedUrls[2]).not.toContain("cursor=");
+    expect(screen.queryByRole("button", { name: "Load more projects" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Cursor expired")).not.toBeInTheDocument();
+  });
 });

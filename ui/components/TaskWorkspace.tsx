@@ -126,18 +126,26 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const [isCreatingAttempt, setIsCreatingAttempt] = useState(false);
   const [downloadingArtifactId, setDownloadingArtifactId] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const hydratedTaskRef = useRef<string | null>(null);
 
-  const refreshAll = useCallback(async () => {
-    const [nextTask, history] = await Promise.all([
-      getTask(taskId),
-      listAttempts(taskId),
-    ]);
-    setTask(nextTask);
-    setAttempts(history.attempts);
-    return nextTask;
+  const refreshAttemptHistory = useCallback(async () => {
+    try {
+      const history = await listAttempts(taskId);
+      setAttempts(history.attempts);
+      setHistoryError(null);
+    } catch (error) {
+      setHistoryError(getCustomerSafeError(error));
+    }
   }, [taskId]);
+
+  const refreshAll = useCallback(async () => {
+    void refreshAttemptHistory();
+    const nextTask = await getTask(taskId);
+    setTask(nextTask);
+    return nextTask;
+  }, [refreshAttemptHistory, taskId]);
 
   useEffect(() => {
     let active = true;
@@ -236,8 +244,8 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     }
   }
 
-  async function reserveAndUpload(items: LocalUpload[]): Promise<void> {
-    if (items.length === 0) return;
+  async function reserveAndUpload(items: LocalUpload[]): Promise<unknown | null> {
+    if (items.length === 0) return null;
     setActionMessage(null);
     items.forEach((item) => {
       updateLocalUpload(item.localId, {
@@ -271,13 +279,32 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       setLocalUploads((current) =>
         current.filter((item) => item.status !== "uploaded"),
       );
+      return null;
     } catch (error) {
       const message = getCustomerSafeError(error);
       items.forEach((item) => {
         updateLocalUpload(item.localId, { status: "failed", error: message });
       });
       setActionMessage(message);
+      return error;
     }
+  }
+
+  function renewUploadBatch(items: LocalUpload[]): LocalUpload[] {
+    const idempotencyKey = createOpaqueId("upload_batch");
+    return items.map((item) => ({
+      ...item,
+      localId: createOpaqueId("local"),
+      manifest: {
+        ...item.manifest,
+        client_file_id: createOpaqueId("file"),
+      },
+      idempotencyKey,
+      status: "reserving",
+      progress: 0,
+      slot: undefined,
+      error: undefined,
+    }));
   }
 
   async function handlePhotoSelection(files: File[]) {
@@ -320,7 +347,21 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       const originalBatch = localUploads.filter(
         (candidate) => candidate.idempotencyKey === item.idempotencyKey,
       );
-      await reserveAndUpload(originalBatch);
+      const reservationError = await reserveAndUpload(originalBatch);
+      if (
+        reservationError instanceof ApiError &&
+        reservationError.code === "upload_batch_expired"
+      ) {
+        const renewedBatch = renewUploadBatch(originalBatch);
+        const originalLocalIds = new Set(
+          originalBatch.map((candidate) => candidate.localId),
+        );
+        setLocalUploads((current) => [
+          ...current.filter((candidate) => !originalLocalIds.has(candidate.localId)),
+          ...renewedBatch,
+        ]);
+        await reserveAndUpload(renewedBatch);
+      }
       return;
     }
 
@@ -415,8 +456,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     const nextTask = await getTask(taskId);
     setTask(nextTask);
     if (nextTask.current_attempt?.attempt_id !== previousAttemptId) {
-      const history = await listAttempts(taskId);
-      setAttempts(history.attempts);
+      void refreshAttemptHistory();
       return true;
     }
     return false;
@@ -811,7 +851,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               </section>
             )}
 
-            {attempts.length > 0 && (
+            {(attempts.length > 0 || historyError) && (
               <section className="workspace-card history-card" aria-labelledby="history-heading">
                 <div className="card-heading compact-heading">
                   <div>
@@ -820,36 +860,50 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                   </div>
                   <span className="count-pill">{attempts.length}</span>
                 </div>
-                <ol className="attempt-list">
-                  {attempts.map((attempt) => (
-                    <li key={attempt.attempt_id}>
-                      <div className={`attempt-number ${attempt.status}`}>
-                        {attempt.status === "ready" ? <CheckIcon /> : attempt.attempt_number}
-                      </div>
-                      <div className="attempt-copy">
-                        <strong>Version {attempt.attempt_number}</strong>
-                        <small>
-                          {attempt.refinement_note ?? "Original memory direction"}
-                        </small>
-                        <time dateTime={attempt.created_at}>{formatDate(attempt.created_at)}</time>
-                      </div>
-                      <span className={`status-chip ${ATTEMPT_STATUS_CONTENT[attempt.status].tone}`}>
-                        {ATTEMPT_STATUS_CONTENT[attempt.status].label}
-                      </span>
-                      {attempt.status === "ready" && attempt.artifact && (
-                        <button
-                          className="icon-button history-download"
-                          aria-label={`Download version ${attempt.attempt_number}`}
-                          disabled={downloadingArtifactId === attempt.artifact.artifact_id}
-                          onClick={() => void handleDownload(attempt.artifact as ArtifactView)}
-                          type="button"
-                        >
-                          <DownloadIcon />
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ol>
+                {historyError && (
+                  <div className="history-error" role="alert">
+                    <p>{historyError}</p>
+                    <button
+                      className="text-button"
+                      onClick={() => void refreshAttemptHistory()}
+                      type="button"
+                    >
+                      Retry history
+                    </button>
+                  </div>
+                )}
+                {attempts.length > 0 && (
+                  <ol className="attempt-list">
+                    {attempts.map((attempt) => (
+                      <li key={attempt.attempt_id}>
+                        <div className={`attempt-number ${attempt.status}`}>
+                          {attempt.status === "ready" ? <CheckIcon /> : attempt.attempt_number}
+                        </div>
+                        <div className="attempt-copy">
+                          <strong>Version {attempt.attempt_number}</strong>
+                          <small>
+                            {attempt.refinement_note ?? "Original memory direction"}
+                          </small>
+                          <time dateTime={attempt.created_at}>{formatDate(attempt.created_at)}</time>
+                        </div>
+                        <span className={`status-chip ${ATTEMPT_STATUS_CONTENT[attempt.status].tone}`}>
+                          {ATTEMPT_STATUS_CONTENT[attempt.status].label}
+                        </span>
+                        {attempt.status === "ready" && attempt.artifact && (
+                          <button
+                            className="icon-button history-download"
+                            aria-label={`Download version ${attempt.attempt_number}`}
+                            disabled={downloadingArtifactId === attempt.artifact.artifact_id}
+                            onClick={() => void handleDownload(attempt.artifact as ArtifactView)}
+                            type="button"
+                          >
+                            <DownloadIcon />
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                )}
               </section>
             )}
           </div>

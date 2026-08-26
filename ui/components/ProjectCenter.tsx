@@ -13,6 +13,7 @@ import {
 } from "@/components/Icons";
 import { RuntimeModeBadge } from "@/components/RuntimeModeBadge";
 import {
+  ApiError,
   type ArtifactView,
   type AttemptStatus,
   type AttemptView,
@@ -122,6 +123,11 @@ export function ProjectCenter() {
       setNextCursor(response.next_cursor);
       setPageError(null);
     } catch (error) {
+      if (error instanceof ApiError && error.code === "invalid_cursor") {
+        setNextCursor(null);
+        await loadFirstPage();
+        return;
+      }
       setPageError(getCustomerSafeError(error));
     } finally {
       setIsLoadingMore(false);
