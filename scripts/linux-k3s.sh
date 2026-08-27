@@ -86,7 +86,9 @@ require_openai_secret() {
   if [[ "$generation_provider" != "openai" ]]; then
     return
   fi
-  if ! kube get secret ai-artist-openai -n "$namespace" >/dev/null 2>&1 || ! kube get secret ai-artist-openai -n "$namespace" -o go-template='{{range $key, $value := .data}}{{$key}}{{"\\n"}}{{end}}' | grep -qx 'OPENAI_API_KEY'; then
+  local encoded_key
+  if ! encoded_key="$(kube get secret ai-artist-openai -n "$namespace" -o jsonpath='{.data.OPENAI_API_KEY}')" \
+    || [[ -z "$encoded_key" ]]; then
     echo "OpenAI mode requires an existing ai-artist-openai Secret with an OPENAI_API_KEY key; the deployment will not create or print it." >&2
     exit 1
   fi

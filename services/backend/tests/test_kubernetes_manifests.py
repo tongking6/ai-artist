@@ -63,3 +63,11 @@ def test_openai_key_is_referenced_only_by_the_generation_worker() -> None:
     assert "name: OPENAI_API_KEY" in generation_worker
     assert "name: ai-artist-openai" in generation_worker
     assert "optional: true" in generation_worker
+
+
+def test_openai_deploy_preflight_checks_the_key_without_printing_it() -> None:
+    deploy_script = (REPOSITORY_ROOT / "scripts/linux-k3s.sh").read_text()
+
+    assert "-o jsonpath='{.data.OPENAI_API_KEY}'" in deploy_script
+    assert '[[ -z "$encoded_key" ]]' in deploy_script
+    assert "go-template=" not in deploy_script
