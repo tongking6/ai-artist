@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -7,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
+from PIL import Image
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
@@ -139,6 +141,52 @@ def test_expired_asset_transition_commits_before_domain_error(
         assert task is not None
         assert task.status == "draft"
         assert task.updated_at > now - timedelta(hours=2)
+
+
+def test_task_collection_materializes_expired_uploads(
+    sessions: sessionmaker[Session],
+) -> None:
+    now = datetime.now(UTC)
+    task_id = "task_collection_expiration"
+    asset_id = "asset_collection_expiration"
+    with sessions.begin() as session:
+        session.add(
+            Task(
+                task_id=task_id,
+                status="uploading",
+                created_at=now - timedelta(hours=2),
+                updated_at=now - timedelta(hours=2),
+            )
+        )
+        session.add(
+            Asset(
+                asset_id=asset_id,
+                task_id=task_id,
+                client_file_id="file_collection_expiration",
+                upload_batch_key="batch_collection_expiration",
+                filename="expired.png",
+                media_type="image/png",
+                size_bytes=4,
+                upload_status="pending",
+                storage_key=f"tasks/{task_id}/uploads/{asset_id}.png",
+                upload_url_expires_at=now - timedelta(hours=1),
+                created_at=now - timedelta(hours=2),
+                updated_at=now - timedelta(hours=2),
+            )
+        )
+
+    with sessions() as session:
+        result = service.list_tasks(session, limit=25, cursor=None)
+
+    assert len(result.tasks) == 1
+    assert result.tasks[0].status == "draft"
+    with sessions() as session:
+        asset = session.get(Asset, asset_id)
+        task = session.get(Task, task_id)
+        assert asset is not None
+        assert asset.upload_status == "expired"
+        assert task is not None
+        assert task.status == "draft"
 
 
 def test_uploaded_asset_is_promoted_to_an_immutable_key(
@@ -308,3 +356,122 @@ def test_expired_lease_fences_late_finalization(
         assert attempt is not None
         assert attempt.status == "failed"
         assert session.scalar(select(func.count()).select_from(Artifact)) == 0
+
+
+def test_ambiguous_finalize_commit_preserves_published_artifact(
+    sessions: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime.now(UTC)
+    task_id = "task_ambiguous_commit"
+    asset_id = "asset_ambiguous_commit"
+    attempt_id = "att_ambiguous_commit"
+    lease_token = uuid4()
+    source_key = f"tasks/{task_id}/assets/{asset_id}/source.png"
+    source = _png((32, 24), (120, 80, 40))
+    snapshot = {
+        "task_id": task_id,
+        "title": "Ambiguous commit",
+        "photo_asset_ids": [asset_id],
+        "prompt_recipe_version": "m1.postcard_prompt.v1",
+    }
+    with sessions.begin() as session:
+        session.add(
+            Task(
+                task_id=task_id,
+                status="ready",
+                title="Ambiguous commit",
+                note="Preserve published artifact",
+                style="warm_handmade",
+                current_attempt_id=attempt_id,
+                created_at=now - timedelta(minutes=1),
+                updated_at=now,
+            )
+        )
+        session.add(
+            Asset(
+                asset_id=asset_id,
+                task_id=task_id,
+                client_file_id="file_ambiguous_commit",
+                upload_batch_key="batch_ambiguous_commit",
+                filename="source.png",
+                media_type="image/png",
+                size_bytes=len(source),
+                upload_status="uploaded",
+                storage_key=source_key,
+                upload_url_expires_at=now + timedelta(minutes=15),
+                created_at=now - timedelta(minutes=1),
+                updated_at=now,
+            )
+        )
+        session.add(
+            Attempt(
+                attempt_id=attempt_id,
+                task_id=task_id,
+                attempt_number=1,
+                status="generating",
+                input_snapshot=snapshot,
+                provider_id="fake",
+                provider_model="fake-v1",
+                lease_token=lease_token,
+                lease_expires_at=now + timedelta(minutes=10),
+                created_at=now - timedelta(minutes=1),
+                started_at=now,
+                updated_at=now,
+            )
+        )
+
+    claimed = worker.ClaimedAttempt(
+        attempt_id=attempt_id,
+        task_id=task_id,
+        lease_token=lease_token,
+        lease_expires_at=now + timedelta(minutes=10),
+        input_snapshot=snapshot,
+        provider_id="fake",
+        provider_model="fake-v1",
+    )
+    store = MemoryObjectStore({source_key: (source, "image/png")})
+    monkeypatch.setattr(worker, "SessionLocal", sessions)
+    committed_finalize = worker.finalize_ready
+
+    def commit_then_disconnect(
+        claimed_attempt: worker.ClaimedAttempt,
+        *,
+        provider_request_id: str | None,
+        output_key: str,
+        output_bytes: bytes,
+        checksum: bytes,
+    ) -> None:
+        committed_finalize(
+            claimed_attempt,
+            provider_request_id=provider_request_id,
+            output_key=output_key,
+            output_bytes=output_bytes,
+            checksum=checksum,
+        )
+        raise ConnectionError("commit acknowledgement was lost")
+
+    monkeypatch.setattr(worker, "finalize_ready", commit_then_disconnect)
+    worker.process_claimed_attempt(
+        claimed,
+        settings=Settings(),
+        object_store=store,
+        provider=worker.FakeGenerationProvider(),
+    )
+
+    output_key = f"tasks/{task_id}/attempts/{attempt_id}/postcard.png"
+    assert store.inspect(output_key) is not None
+    with sessions() as session:
+        attempt = session.get(Attempt, attempt_id)
+        artifact = session.scalar(select(Artifact).where(Artifact.attempt_id == attempt_id))
+        assert attempt is not None
+        assert attempt.status == "ready"
+        assert artifact is not None
+        assert artifact.storage_key == output_key
+
+
+def _png(size: tuple[int, int], color: tuple[int, int, int]) -> bytes:
+    image = Image.new("RGB", size, color)
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()

@@ -46,3 +46,10 @@ def test_home_storage_class_is_pinned_to_the_ssd_path() -> None:
     assert storage_patch.count("storageClassName: ai-artist-local-path") == 2
     assert "default-local-storage-path" in deploy_script
     assert "spec.hostPath.path" in deploy_script
+
+
+def test_backend_log_level_uses_the_settings_env_prefix() -> None:
+    config = (REPOSITORY_ROOT / "infra/kubernetes/base/config.yaml").read_text()
+
+    assert "AI_ARTIST_LOG_LEVEL: INFO" in config
+    assert "\n  LOG_LEVEL: INFO" not in config

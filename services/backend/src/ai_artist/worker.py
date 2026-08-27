@@ -8,6 +8,7 @@ import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from threading import Event, Thread
 from uuid import UUID, uuid4
 
 from PIL import Image
@@ -112,6 +113,7 @@ def process_claimed_attempt(
 ) -> None:
     output_key = f"tasks/{claimed.task_id}/attempts/{claimed.attempt_id}/postcard.png"
     stored_output = False
+    finalization_started = False
     try:
         if (
             provider.provider_id != claimed.provider_id
@@ -162,6 +164,7 @@ def process_claimed_attempt(
             or stored.size_bytes != len(normalized)
         ):
             raise RuntimeError("Stored postcard failed verification")
+        finalization_started = True
         finalize_ready(
             claimed,
             provider_request_id=generated.provider_request_id,
@@ -174,8 +177,13 @@ def process_claimed_attempt(
             "Attempt generation failed",
             extra={"task_id": claimed.task_id, "attempt_id": claimed.attempt_id},
         )
-        if stored_output:
+        if stored_output and not finalization_started:
             object_store.delete(output_key)
+        elif stored_output:
+            logger.warning(
+                "Preserving attempt output because database finalization is uncertain",
+                extra={"task_id": claimed.task_id, "attempt_id": claimed.attempt_id},
+            )
         finalize_failed(claimed)
 
 
@@ -268,9 +276,24 @@ def finalize_failed(claimed: ClaimedAttempt) -> None:
             task.updated_at = now
 
 
-def run_once(settings: Settings, object_store: ObjectStore) -> bool:
+def _reconcile_once() -> None:
     with SessionLocal() as session:
-        reconcile_expired_attempts(session)
+        reconciled = reconcile_expired_attempts(session)
+    if reconciled:
+        logger.info("Reconciled expired attempts", extra={"attempt_count": reconciled})
+
+
+def _reconcile_loop(settings: Settings, stop_event: Event) -> None:
+    while not stop_event.is_set():
+        try:
+            _reconcile_once()
+        except Exception:
+            logger.exception("Expired attempt reconciliation failed")
+        if stop_event.wait(settings.attempt_reconcile_interval_seconds):
+            return
+
+
+def run_once(settings: Settings, object_store: ObjectStore) -> bool:
     with SessionLocal() as session:
         claimed = claim_attempt(session, settings)
     if claimed is None:
@@ -312,10 +335,22 @@ def run() -> None:
     object_store = S3ObjectStore(settings)
     wait_for_dependencies(object_store)
     logger.info("AI Artist worker started", extra={"provider": settings.generation_provider})
-    while True:
-        processed = run_once(settings, object_store)
-        if not processed:
-            time.sleep(settings.worker_poll_seconds)
+    stop_event = Event()
+    reconciler = Thread(
+        target=_reconcile_loop,
+        args=(settings, stop_event),
+        name="attempt-reconciler",
+        daemon=True,
+    )
+    reconciler.start()
+    try:
+        while True:
+            processed = run_once(settings, object_store)
+            if not processed:
+                time.sleep(settings.worker_poll_seconds)
+    finally:
+        stop_event.set()
+        reconciler.join(timeout=5)
 
 
 def _filename_slug(snapshot: dict[str, object]) -> str:

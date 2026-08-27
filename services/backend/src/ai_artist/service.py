@@ -64,20 +64,24 @@ def list_tasks(
     limit: int,
     cursor: str | None,
 ) -> TaskListView:
-    statement = select(Task).order_by(Task.updated_at.desc(), Task.task_id.desc())
-    if cursor:
-        cursor_time, cursor_id = _decode_cursor(cursor)
-        statement = statement.where(
-            or_(
-                Task.updated_at < cursor_time,
-                and_(Task.updated_at == cursor_time, Task.task_id < cursor_id),
+    now = utcnow()
+    with session.begin():
+        _expire_stale_assets_for_collection(session, now)
+        session.flush()
+        statement = select(Task).order_by(Task.updated_at.desc(), Task.task_id.desc())
+        if cursor:
+            cursor_time, cursor_id = _decode_cursor(cursor)
+            statement = statement.where(
+                or_(
+                    Task.updated_at < cursor_time,
+                    and_(Task.updated_at == cursor_time, Task.task_id < cursor_id),
+                )
             )
-        )
-    tasks = list(session.scalars(statement.limit(limit + 1)))
-    has_more = len(tasks) > limit
-    tasks = tasks[:limit]
-    summaries = [_task_summary_view(session, task) for task in tasks]
-    next_cursor = _encode_cursor(tasks[-1]) if has_more and tasks else None
+        tasks = list(session.scalars(statement.limit(limit + 1)))
+        has_more = len(tasks) > limit
+        tasks = tasks[:limit]
+        summaries = [_task_summary_view(session, task) for task in tasks]
+        next_cursor = _encode_cursor(tasks[-1]) if has_more and tasks else None
     return TaskListView(tasks=summaries, next_cursor=next_cursor)
 
 
@@ -484,6 +488,20 @@ def _expire_stale_assets(
         asset.updated_at = now
     task.updated_at = now
     _recalculate_task_input_status(session, task, now)
+
+
+def _expire_stale_assets_for_collection(session: Session, now: datetime) -> None:
+    stale_task_ids = select(Asset.task_id).where(
+        Asset.upload_status == "pending",
+        Asset.upload_url_expires_at <= now,
+    )
+    tasks = list(
+        session.scalars(
+            select(Task).where(Task.task_id.in_(stale_task_ids)).with_for_update()
+        )
+    )
+    for task in tasks:
+        _expire_stale_assets(session, task, now=now)
 
 
 def _recalculate_task_input_status(session: Session, task: Task, now: datetime) -> None:

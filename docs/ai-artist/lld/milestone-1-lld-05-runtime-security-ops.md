@@ -132,7 +132,7 @@ Attempt delivery rules:
 - The provider call timeout is 8 minutes, shorter than the 10-minute Attempt lease.
 - M1 makes at most one provider call per Attempt and never changes a failed or expired Attempt back to `queued`.
 - Provider, storage, normalization, or verification failure moves the claimed Attempt to `failed` with a customer-safe `failure_code`.
-- A Worker startup sweep and 60-second periodic sweep mark expired `generating` Attempts `failed`; they clear lease fields and never requeue the Attempt.
+- A dedicated Worker reconciliation thread runs a startup sweep and then a 60-second periodic sweep, independently of synchronous provider calls. It marks expired `generating` Attempts `failed`, clears lease fields, and never requeues the Attempt.
 - Ready finalization requires status `generating`, the matching `lease_token`, and an unexpired lease. It inserts the Artifact and changes the Attempt to `ready` in one PostgreSQL transaction.
 - If the provider returns after lease expiry or terminal failure, the conditional update fails and the Worker discards the response.
 - There is no delivery-count, retry-count, next-retry, job ID, or command JSON field in M1.
@@ -257,7 +257,7 @@ Generation Worker configuration:
 | AI_ARTIST_OPENAI_PROVIDER_SIZE | Fixed at `1808x1200`; LLD-03 center-crops to `1800x1200`. |
 | AI_ARTIST_PROVIDER_TIMEOUT_SECONDS | Fixed at 480 seconds for M1. |
 | OPENAI_API_KEY | OpenAI credential, supplied only to the Generation Worker when `openai` is selected. |
-| LOG_LEVEL | Basic log verbosity. |
+| AI_ARTIST_LOG_LEVEL | Basic log verbosity. |
 
 ## Minimum Observability
 
