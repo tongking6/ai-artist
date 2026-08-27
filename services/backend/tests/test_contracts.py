@@ -77,12 +77,11 @@ def test_ids_are_prefixed_ulids_within_database_limit() -> None:
     assert len(task_id) <= 40
 
 
-def test_current_runtime_accepts_only_the_implemented_fake_provider() -> None:
+def test_runtime_accepts_fake_by_default_and_openai_when_explicit() -> None:
     settings = Settings(generation_provider="fake")
     assert settings.provider_model == "fake-v1"
 
-    with pytest.raises(ValidationError):
-        Settings(generation_provider="openai")  # type: ignore[arg-type]
+    assert Settings(generation_provider="openai").provider_model == "gpt-image-2-2026-04-21"
 
 
 def test_worker_waits_until_schema_and_storage_are_ready(

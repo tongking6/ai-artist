@@ -27,13 +27,15 @@ class Settings(BaseSettings):
     download_url_ttl_seconds: int = Field(default=900, ge=60, le=3600)
     attempt_lease_seconds: int = Field(default=600, ge=60, le=3600)
     attempt_reconcile_interval_seconds: int = Field(default=60, ge=5, le=600)
-    generation_provider: Literal["fake"] = "fake"
+    generation_provider: Literal["fake", "openai"] = "fake"
     provider_timeout_seconds: int = Field(default=480, ge=30, le=540)
     log_level: str = "INFO"
     worker_poll_seconds: float = Field(default=1.0, ge=0.1, le=60)
 
     @property
-    def provider_model(self) -> Literal["fake-v1"]:
+    def provider_model(self) -> Literal["fake-v1", "gpt-image-2-2026-04-21"]:
+        if self.generation_provider == "openai":
+            return "gpt-image-2-2026-04-21"
         return "fake-v1"
 
 

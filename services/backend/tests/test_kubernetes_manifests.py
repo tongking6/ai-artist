@@ -33,8 +33,8 @@ def test_home_storage_class_is_pinned_to_the_ssd_path() -> None:
     ).read_text()
     deploy_script = (REPOSITORY_ROOT / "scripts/linux-k3s.sh").read_text()
 
-    assert "name: ai-artist-local-path" in storage_class
-    assert "provisioner: rancher.io/local-path" in storage_class
+    assert "name: ai-artist-owned-local-path" in storage_class
+    assert "provisioner: ai-artist.io/local-path" in storage_class
     assert "nodePath: /data/ai-artist/k3s-storage" in storage_class
     assert (
         'pathPattern: "{{ .PVC.Namespace }}/{{ .PVC.Name }}/{{ .PVName }}/"'
@@ -43,8 +43,8 @@ def test_home_storage_class_is_pinned_to_the_ssd_path() -> None:
     assert (
         'pathPattern: "{{ .PVC.Namespace }}/{{ .PVC.Name }}/"' not in storage_class
     )
-    assert storage_patch.count("storageClassName: ai-artist-local-path") == 2
-    assert "default-local-storage-path" in deploy_script
+    assert storage_patch.count("storageClassName: ai-artist-owned-local-path") == 2
+    assert "storage_root=\"/data/ai-artist/k3s-storage\"" in deploy_script
     assert "spec.hostPath.path" in deploy_script
 
 
@@ -53,3 +53,13 @@ def test_backend_log_level_uses_the_settings_env_prefix() -> None:
 
     assert "AI_ARTIST_LOG_LEVEL: INFO" in config
     assert "\n  LOG_LEVEL: INFO" not in config
+
+
+def test_openai_key_is_referenced_only_by_the_generation_worker() -> None:
+    applications = (REPOSITORY_ROOT / "infra/kubernetes/base/applications.yaml").read_text()
+    backend_api, generation_worker = applications.split("name: generation-worker", maxsplit=1)
+
+    assert "OPENAI_API_KEY" not in backend_api
+    assert "name: OPENAI_API_KEY" in generation_worker
+    assert "name: ai-artist-openai" in generation_worker
+    assert "optional: true" in generation_worker

@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import io
+from base64 import b64encode
 from threading import Event
+from types import SimpleNamespace
+from typing import Any, cast
 
+import pytest
 from PIL import Image
 
 from ai_artist import worker
-from ai_artist.adapters.generation import FakeGenerationProvider, GeneratePostcardInput
+from ai_artist.adapters import generation
+from ai_artist.adapters.generation import (
+    FakeGenerationProvider,
+    GeneratePostcardInput,
+    OpenAIGenerationProvider,
+)
 from ai_artist.config import Settings
 from ai_artist.worker import normalize_postcard
 
@@ -47,6 +56,81 @@ def test_fake_provider_changes_when_the_snapshot_changes() -> None:
         GeneratePostcardInput(snapshot={"title": "Osaka"}, source_photos=(source,))
     )
     assert first.png_bytes != second.png_bytes
+
+
+def test_openai_provider_builds_the_fixed_edit_request_for_all_source_photos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class Client:
+        def __init__(self, **kwargs: object) -> None:
+            assert kwargs == {"max_retries": 0, "timeout": 480}
+            self.images = SimpleNamespace(edit=self.edit)
+
+        def edit(self, **kwargs: object) -> object:
+            calls.append(kwargs)
+            return SimpleNamespace(
+                data=[SimpleNamespace(b64_json=b64encode(_png((1808, 1200), (1, 2, 3))).decode())],
+                _request_id="req_postcard",
+            )
+
+    monkeypatch.setattr(generation, "OpenAI", Client)
+    provider = OpenAIGenerationProvider()
+    generated = provider.generate_postcard(
+        GeneratePostcardInput(
+            snapshot={
+                "title": "A <different> title",
+                "note": "Keep the lake",
+                "refinement_note": "Use softer colors",
+            },
+            source_photos=tuple(_png((12, 12), (index, 2, 3)) for index in range(1, 6)),
+        )
+    )
+
+    assert generated.provider_request_id == "req_postcard"
+    assert len(calls) == 1
+    request = cast(dict[str, Any], calls[0])
+    assert request["model"] == "gpt-image-2-2026-04-21"
+    assert request["n"] == 1
+    assert request["quality"] == "medium"
+    assert request["size"] == "1808x1200"
+    assert request["output_format"] == "png"
+    images = cast(list[tuple[str, bytes, str]], request["image"])
+    assert [image[0] for image in images] == [
+        "reference-1.png",
+        "reference-2.png",
+        "reference-3.png",
+        "reference-4.png",
+        "reference-5.png",
+    ]
+    prompt = cast(str, request["prompt"])
+    assert "NON-NEGOTIABLE PRESERVATION" in prompt
+    assert "<customer_title>A <different> title</customer_title>" in prompt
+    assert "Do not render the title" in prompt
+
+
+def test_openai_provider_rejects_invalid_input_or_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Client:
+        def __init__(self, **kwargs: object) -> None:
+            self.images = SimpleNamespace(edit=lambda **_: SimpleNamespace(data=[]))
+
+    monkeypatch.setattr(generation, "OpenAI", Client)
+    provider = OpenAIGenerationProvider()
+    with pytest.raises(RuntimeError, match="one to five"):
+        provider.generate_postcard(GeneratePostcardInput(snapshot={}, source_photos=()))
+    with pytest.raises(RuntimeError, match="no postcard image"):
+        provider.generate_postcard(
+            GeneratePostcardInput(snapshot={}, source_photos=(_png((12, 12), (1, 2, 3)),))
+        )
+
+
+def test_worker_selects_openai_provider_only_when_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
+    expected = object()
+
+    monkeypatch.setattr(worker, "OpenAIGenerationProvider", lambda **_: expected)
+    assert worker._provider_for(Settings(generation_provider="openai")) is expected
+    assert isinstance(worker._provider_for(Settings()), FakeGenerationProvider)
 
 
 def test_reconcile_loop_uses_the_configured_interval(

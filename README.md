@@ -16,7 +16,7 @@ The repository contains one end-to-end M1 foundation:
 - `scripts/linux-k3s.sh`: image build/import, deployment, runtime checks, and Tailscale Serve setup.
 - `.github/workflows/ci.yml`: frontend, backend, PostgreSQL lifecycle, and browser verification.
 
-The runnable server path currently uses the deterministic `fake` generation provider. It exercises Browser -> API -> PostgreSQL/MinIO -> Worker -> Artifact -> download without an external AI credential. The OpenAI Image API contract is designed in LLD-03, but its production adapter is not implemented yet; do not configure `AI_ARTIST_GENERATION_PROVIDER=openai` in the current codebase.
+The runnable server path defaults to the deterministic `fake` generation provider. It exercises Browser -> API -> PostgreSQL/MinIO -> Worker -> Artifact -> download without an external AI credential. `AI_ARTIST_GENERATION_PROVIDER=openai` is an explicit Worker-only deployment mode: it sends the selected photos and creative guidance to OpenAI's Images edits API and requires an operator-created Worker-only Secret. See [SETUP.md](./SETUP.md) before enabling it.
 
 Repository code and green CI are not proof that the home server is deployed. Use the deployment and live smoke checks in [SETUP.md](./SETUP.md) before making runtime claims.
 
@@ -37,7 +37,7 @@ Not in the active M1 implementation:
 - Rights workflow, automated visual QA, or operator review.
 - Accounts, payments, pricing, public galleries, or public Internet access.
 - Etsy, Shopify, POD, NFT, publishing, fulfillment, or buyer messaging.
-- The production OpenAI adapter, high availability, or AWS deployment.
+- High availability or AWS deployment.
 
 These remain possible future product directions. The older [Memory Product Pack PRFAQ](./docs/ai-artist/prfaq/milestone-1-scope.md) is retained as historical product exploration, not as the current implementation or launch promise.
 

@@ -218,6 +218,12 @@ spec:
                 secretKeyRef:
                   name: ai-artist-secrets
                   key: MINIO_ROOT_PASSWORD
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-artist-openai
+                  key: OPENAI_API_KEY
+                  optional: true
           resources:
             requests:
               cpu: 100m

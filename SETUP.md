@@ -12,13 +12,33 @@ Browser -> FastAPI -> PostgreSQL/MinIO -> Generation Worker -> postcard.png
 
 It exercises the real Task, Asset, Attempt, Artifact, upload, generation, and download lifecycle without sending photos to an external AI provider.
 
-The OpenAI Image API contract is designed in LLD-03, but the production adapter and OpenAI SDK dependency are not implemented. The current code accepts only:
+The server defaults to the deterministic provider:
 
 ```bash
 AI_ARTIST_GENERATION_PROVIDER=fake
 ```
 
-Do not configure `openai` or create `OPENAI_API_KEY` until the adapter, tests, workload Secret boundary, and owned-fixture readiness check are implemented.
+`openai` is an explicit production mode. It calls `POST /v1/images/edits` with all 1–5 source photos, `gpt-image-2-2026-04-21`, `n=1`, `quality=medium`, `size=1808x1200`, `output_format=png`, zero SDK retries, and a 480-second timeout. The Worker center-crops the resulting PNG to the same `1800x1200` `postcard.png` artifact contract. It never retries a failed Attempt.
+
+## OpenAI Real-photo Smoke (Owner-operated)
+
+Use only photos that the owner has explicitly authorized. Do not add photos, generated PNGs, or API keys to this repository.
+
+On the Linux K3s server, create the secret interactively so the key is never placed in a command line, shell history, manifest, or log:
+
+```bash
+sudo k3s kubectl -n ai-artist create secret generic ai-artist-openai --from-file=OPENAI_API_KEY=/dev/stdin
+```
+
+Paste the key, press `Ctrl-D`, then deploy OpenAI mode from a clean commit:
+
+```bash
+AI_ARTIST_GENERATION_PROVIDER=openai ./scripts/linux-k3s.sh deploy
+```
+
+The script verifies that the existing Secret has an `OPENAI_API_KEY` key without reading or printing its value. The `OPENAI_API_KEY` environment variable is referenced only by the `generation-worker` Deployment; Website and backend-api do not receive it.
+
+Open the private tailnet URL, upload one to five owner-approved photos, fill title and note, acknowledge the Create postcard disclosure, and select **Create postcard**. Verify the Attempt transitions `queued` → `generating` → `ready`, Worker logs show one provider request without secret material, and the downloaded PNG is exactly `1800x1200`. If OpenAI rejects or times out, confirm the Attempt becomes terminal `failed`; create a separate refinement Attempt rather than retrying it. Run `./scripts/linux-k3s.sh logs` only for status diagnostics and do not copy provider payloads into issue reports.
 
 ## Phase 1 Access Boundary
 
@@ -142,7 +162,7 @@ Empty base URLs use the canonical current origin. Do not place credentials or in
 - Generation Worker: Python, sharing the backend domain package while running as a separate process.
 - Persistence: PostgreSQL with SQLAlchemy 2 and Alembic.
 - Object storage: S3-compatible adapter with MinIO in Phase 1.
-- Implemented generation provider: deterministic `fake-v1`.
+- Generation providers: default deterministic `fake-v1`; explicit OpenAI Images edits mode.
 - Image normalization: Pillow, from `1808x1200` provider-format PNG to `1800x1200` artifact PNG.
 
 Both initial generation and refinement use `POST /v1/tasks/{task_id}/attempts`. M1 never automatically retries or requeues a claimed Attempt.
@@ -155,17 +175,6 @@ Both initial generation and refinement use `POST /v1/tasks/{task_id}/attempts`. 
 - Access: private household tailnet only.
 - Publishing: local download only; no automatic external actions.
 
-## Planned Provider Contract
-
-LLD-03 defines a future OpenAI adapter that will use the official Python SDK, one provider call per Attempt, `max_retries=0`, an 8-minute timeout, and server-side credentials available only to the Generation Worker. Those are target contracts, not current setup steps.
-
-Before enabling that adapter:
-
-1. Add the provider dependency and implementation behind `GenerationProvider`.
-2. Add unit tests for request construction, zero retries, response normalization, failures, and late-response fencing.
-3. Add `OPENAI_API_KEY` only to the Generation Worker Secret boundary.
-4. Use owned or explicitly approved fixture photos for the first real-provider readiness check.
-5. Confirm the UI clearly explains that selected photos and creative guidance leave the home network.
 
 ## Deferred Product Exploration
 

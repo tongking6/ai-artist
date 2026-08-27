@@ -15,6 +15,7 @@ ui_image=""
 backend_image=""
 image_archive=""
 render_root=""
+generation_provider="${AI_ARTIST_GENERATION_PROVIDER:-fake}"
 
 cleanup() {
   if [[ -n "$image_archive" && -f "$image_archive" ]]; then
@@ -68,6 +69,21 @@ prepare_render_tree() {
   mv -- "$temporary" "$kustomization"
   if grep -F "__AI_ARTIST_IMAGE_TAG__" "$kustomization" >/dev/null; then
     echo "Image tag placeholder was not replaced." >&2
+    exit 1
+  fi
+  if [[ "$generation_provider" != "fake" && "$generation_provider" != "openai" ]]; then
+    echo "AI_ARTIST_GENERATION_PROVIDER must be fake or openai." >&2
+    exit 1
+  fi
+  sed -i "s/AI_ARTIST_GENERATION_PROVIDER: fake/AI_ARTIST_GENERATION_PROVIDER: ${generation_provider}/" "$render_root/base/config.yaml"
+}
+
+require_openai_secret() {
+  if [[ "$generation_provider" != "openai" ]]; then
+    return
+  fi
+  if ! kube get secret ai-artist-openai -n "$namespace" >/dev/null 2>&1 || ! kube get secret ai-artist-openai -n "$namespace" -o go-template='{{range $key, $value := .data}}{{$key}}{{"\\n"}}{{end}}' | grep -qx 'OPENAI_API_KEY'; then
+    echo "OpenAI mode requires an existing ai-artist-openai Secret with an OPENAI_API_KEY key; the deployment will not create or print it." >&2
     exit 1
   fi
 }
@@ -226,6 +242,7 @@ deploy() {
   check_existing_storage
   check_existing_storage_class
   ensure_secret
+  require_openai_secret
   build_and_import_images
   kube apply -k "$render_root/overlays/home"
   verify_storage_class

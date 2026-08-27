@@ -19,6 +19,7 @@ from ai_artist.adapters.generation import (
     FakeGenerationProvider,
     GeneratePostcardInput,
     GenerationProvider,
+    OpenAIGenerationProvider,
 )
 from ai_artist.adapters.object_store import ObjectStore, S3ObjectStore
 from ai_artist.config import Settings, get_settings
@@ -302,9 +303,15 @@ def run_once(settings: Settings, object_store: ObjectStore) -> bool:
         claimed,
         settings=settings,
         object_store=object_store,
-        provider=FakeGenerationProvider(),
+        provider=_provider_for(settings),
     )
     return True
+
+
+def _provider_for(settings: Settings) -> GenerationProvider:
+    if settings.generation_provider == "openai":
+        return OpenAIGenerationProvider()
+    return FakeGenerationProvider()
 
 
 def wait_for_dependencies(
