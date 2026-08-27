@@ -16,11 +16,14 @@ test("runs the real M1 workflow against the Linux server", async ({ page }, test
 
   await page.getByLabel("Postcard title").fill(title);
   await page.getByLabel("Memory note").fill("A real end-to-end check through the Linux server.");
-  await page.locator('input[type="file"]').setInputFiles({
-    name: "server-check.png",
-    mimeType: "image/png",
-    buffer: ONE_PIXEL_PNG,
-  });
+  const ownedFixturePath = process.env.AI_ARTIST_E2E_IMAGE;
+  await page.locator('input[type="file"]').setInputFiles(
+    ownedFixturePath ?? {
+      name: "server-check.png",
+      mimeType: "image/png",
+      buffer: ONE_PIXEL_PNG,
+    },
+  );
 
   await expect(page.getByText("Uploaded", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Done adding photos" }).click();

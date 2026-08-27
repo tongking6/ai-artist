@@ -6,7 +6,7 @@
 | --- | --- |
 | Product milestone | M1: Memory Postcard Studio |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Active contracts; fake-provider foundation implemented, OpenAI adapter pending |
+| Status | Active contracts; fake and OpenAI providers implemented; real-provider deployment evidence pending |
 | Scope | Website Task intake, postcard generation, minimum runtime, and private artifact download |
 
 ## Active LLD Set
@@ -16,7 +16,7 @@
 | [LLD-00](./milestone-1-lld-00-implementation-foundation.md) | Implementation Foundation | Implemented foundation |
 | [LLD-01](./milestone-1-lld-01-website-intake-status-delivery.md) | Website Task Intake, Status, Refinement, and Delivery UX | Implementation-ready; UX and access contracts finalized |
 | [LLD-02](./milestone-1-lld-02-backend-api-lifecycle.md) | Backend API, Task Data Model, Attempts, Upload/Download Links | Implementation-ready; schema and API finalized |
-| [LLD-03](./milestone-1-lld-03-generation-worker.md) | Postcard Generation Worker and Minimum Verification | Fake provider implemented; OpenAI target contract pending implementation |
+| [LLD-03](./milestone-1-lld-03-generation-worker.md) | Postcard Generation Worker and Minimum Verification | Fake and OpenAI providers implemented; real-provider E2E pending |
 | [LLD-05](./milestone-1-lld-05-runtime-security-ops.md) | Home Kubernetes Runtime, Storage, Security, and Attempt Queue | Home manifests implemented; deployment evidence remains environment-owned |
 
 [LLD-04](./milestone-1-lld-04-qa-packaging-delivery.md) is deferred and is not part of the M1 execution path.

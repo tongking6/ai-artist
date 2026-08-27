@@ -7,14 +7,14 @@
 | LLD | LLD-05 |
 | Product milestone | M1: Memory Postcard Studio |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Home manifests implemented; fake-provider verification path active, OpenAI adapter pending |
+| Status | Home manifests and OpenAI adapter implemented; fake-provider verification path active, real-provider E2E pending |
 | Scope owner | Home Kubernetes runtime, Tailscale access boundary, private storage, queued-Attempt delivery, OpenAI access, and retention |
 
 ## Purpose
 
 LLD-05 defines the minimum Phase 1 runtime and security posture for the M1 `Task` -> `Attempt` -> postcard artifact workflow.
 
-Phase 1 runs on a home Linux server with a single-node K3s cluster. The complete customer workflow is available only to authorized devices in the owner's Tailscale tailnet. LAN devices use the same Tailscale URL rather than a separate LAN ingress. The implemented Generation Worker currently uses the deterministic fake provider. The target OpenAI adapter will call the Image API over outbound HTTPS using a server-side API key; the home server will not run an AI model.
+Phase 1 runs on a home Linux server with a single-node K3s cluster. The complete customer workflow is available only to authorized devices in the owner's Tailscale tailnet. LAN devices use the same Tailscale URL rather than a separate LAN ingress. The Generation Worker defaults to the deterministic fake provider and can use the implemented OpenAI adapter when selected at deployment. OpenAI calls the Image API over outbound HTTPS using a server-side API key; the home server will not run an AI model.
 
 Initial integration verification runs directly on this Linux K3s runtime with the deterministic fake provider. Provider-cost and credential-dependent checks begin only after the real Website, API, PostgreSQL, MinIO, Worker, artifact, and download flow passes through the tailnet origin.
 
@@ -180,7 +180,7 @@ Current implementation rules:
 
 Target external-provider rules:
 
-- A future `openai` adapter calls the OpenAI Image API over outbound HTTPS using the fixed LLD-03 request contract.
+- The `openai` adapter calls the OpenAI Image API over outbound HTTPS using the fixed LLD-03 request contract.
 - The official OpenAI Python client uses `max_retries=0`; the Worker, HTTP transport, Ingress, and service mesh do not retry provider calls.
 - The target model is fixed to `gpt-image-2-2026-04-21`; Anthropic and other adapters are deferred.
 - Source photos, title, note, style, and refinement content may leave the home network. The UI or operator documentation must make that boundary clear before non-fixture use.

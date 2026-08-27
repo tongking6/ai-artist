@@ -7,7 +7,7 @@
 | LLD | LLD-00 |
 | Product milestone | M1: `Memory Postcard Studio` |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Foundation implemented; OpenAI provider adapter pending |
+| Status | Foundation and OpenAI provider adapter implemented; real-provider E2E pending |
 | Scope owner | Repository layout, application stack, process boundaries, and baseline verification |
 
 ## Purpose
@@ -24,7 +24,7 @@ LLD-00 fixes the implementation foundation shared by the active M1 LLDs. It does
 | Generation Worker | Python process using the same backend package and domain models as the API |
 | Persistence | PostgreSQL through SQLAlchemy 2; Alembic owns schema migrations |
 | Object storage | S3-compatible adapter using `boto3`; MinIO is the Phase 1 runtime |
-| AI provider client | Current: deterministic fake provider; target: official OpenAI Python SDK with `max_retries=0` behind `GenerationProvider` |
+| AI provider client | Deterministic fake provider by default; official OpenAI Python SDK with `max_retries=0` behind `GenerationProvider` when selected at deployment |
 | Image decoding and normalization | Pillow |
 | Frontend tests | Vitest and React Testing Library |
 | Backend tests | pytest |

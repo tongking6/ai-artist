@@ -7,7 +7,7 @@
 | LLD | LLD-03 |
 | Product milestone | M1: `Memory Postcard Studio` |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Fake provider implemented; OpenAI provider and prompt contract pending implementation |
+| Status | Fake and OpenAI providers implemented; real-provider E2E pending |
 | Scope owner | Postcard generation, minimum output verification, artifact metadata, and Attempt status updates |
 
 ## Purpose
@@ -18,9 +18,9 @@ The worker is not customer-facing. It atomically claims a queued Attempt from Po
 
 ## Implementation Status
 
-The current repository implements `GenerationProvider`, `FakeGenerationProvider`, provider-neutral Worker execution, normalization, lease fencing, Artifact persistence, and failure handling. The runnable setting is exactly `AI_ARTIST_GENERATION_PROVIDER=fake`.
+The current repository implements `GenerationProvider`, `FakeGenerationProvider`, `OpenAIGenerationProvider`, provider-neutral Worker execution, normalization, lease fencing, Artifact persistence, and failure handling. The default runnable setting is `AI_ARTIST_GENERATION_PROVIDER=fake`; deploy-time selection may set it to `openai` only after the Worker-only `ai-artist-openai` Secret is present.
 
-The OpenAI request, prompt, credential, and zero-retry sections below are target contracts for a separate implementation slice. The repository does not yet contain the OpenAI SDK dependency or adapter, and current setup must not advertise `openai` as an available provider.
+The OpenAI request, prompt, credential, and zero-retry sections below are implemented contracts. They are covered by deterministic adapter tests; credentialed server deployment and owned-fixture E2E remain operational verification work.
 
 ## In Scope
 
@@ -387,7 +387,7 @@ LLD-03 provides:
 
 ## Provider Configuration
 
-The current repository accepts only `AI_ARTIST_GENERATION_PROVIDER=fake`. A future OpenAI implementation may add `openai` after the adapter, dependency, tests, and Generation Worker-only Secret boundary are present. The target model, quality, provider output size, normalized output size, and no-retry rule remain fixed M1 design contracts rather than current deployment toggles.
+The repository accepts `AI_ARTIST_GENERATION_PROVIDER=fake|openai` at deployment time, defaulting to `fake`. `openai` requires the `ai-artist-openai` Kubernetes Secret with `OPENAI_API_KEY`, mounted only into the Generation Worker. The model, quality, provider output size, normalized output size, and no-retry rule remain fixed M1 design contracts rather than deployment toggles.
 
 Official references used to freeze this contract:
 

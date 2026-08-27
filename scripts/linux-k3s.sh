@@ -62,20 +62,24 @@ prepare_render_tree() {
   require_tool sed
   render_root="$(mktemp -d /tmp/ai-artist-render.XXXXXX)"
   cp -R "$repo_root/infra/kubernetes/." "$render_root/"
-  local kustomization temporary
+  local kustomization config temporary
   kustomization="$render_root/overlays/home/kustomization.yaml"
+  config="$render_root/base/config.yaml"
   temporary="${kustomization}.tmp"
   sed "s/__AI_ARTIST_IMAGE_TAG__/${image_tag}/g" "$kustomization" >"$temporary"
   mv -- "$temporary" "$kustomization"
-  if grep -F "__AI_ARTIST_IMAGE_TAG__" "$kustomization" >/dev/null; then
-    echo "Image tag placeholder was not replaced." >&2
+  temporary="${config}.tmp"
+  sed "s/__AI_ARTIST_GENERATION_PROVIDER__/${generation_provider}/g" "$config" >"$temporary"
+  mv -- "$temporary" "$config"
+  if grep -R -F "__AI_ARTIST_IMAGE_TAG__" "$render_root" >/dev/null \
+    || grep -R -F "__AI_ARTIST_GENERATION_PROVIDER__" "$render_root" >/dev/null; then
+    echo "Runtime placeholders were not replaced." >&2
     exit 1
   fi
   if [[ "$generation_provider" != "fake" && "$generation_provider" != "openai" ]]; then
     echo "AI_ARTIST_GENERATION_PROVIDER must be fake or openai." >&2
     exit 1
   fi
-  sed -i "s/AI_ARTIST_GENERATION_PROVIDER: fake/AI_ARTIST_GENERATION_PROVIDER: ${generation_provider}/" "$render_root/base/config.yaml"
 }
 
 require_openai_secret() {
