@@ -116,7 +116,7 @@ Runtime responsibilities:
 | Backend API Deployment | Create Tasks, issue upload/download links, validate input, create queued Attempts, and return status. |
 | PostgreSQL | Store the four normative tables; Attempt rows also provide the durable queue. |
 | Private S3-compatible object store | Store source uploads and postcard artifacts on persistent storage. |
-| Generation Worker Deployment | Claim queued Attempts and call the configured external AI provider over outbound HTTPS. |
+| Generation Worker Deployment | Claim queued Attempts and call the configured `GenerationProvider`; the current implementation uses in-process `fake-v1`, while a future OpenAI adapter will use outbound HTTPS. |
 | Kubernetes/container logs | Provide basic runtime and failure visibility without a complex observability stack. |
 
 ## 6. Primary Runtime Flow

@@ -47,7 +47,7 @@ services/
       adapters/
         database/              # SQLAlchemy repositories
         object_store/          # S3-compatible ObjectStore
-        generation/            # OpenAI and deterministic fake providers
+        generation/            # GenerationProvider boundary; current fake adapter, target OpenAI adapter
     migrations/                # Alembic migrations
 infra/
   kubernetes/

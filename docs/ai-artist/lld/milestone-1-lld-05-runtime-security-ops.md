@@ -345,7 +345,7 @@ Checks that mention the OpenAI SDK, external-provider traffic, or `OPENAI_API_KE
 
 ## Deployment Parameters
 
-The Kubernetes distribution, access hostname, access proxy, storage paths, initial PVC requests, backup target, and local image-delivery method are fixed above. The implementation pins an exact supported K3s patch version and immutable application-image tags when the scaffold is created. Database/object-store passwords remain deployment inputs and never enter the repository. A future OpenAI credential must follow the LLD-03 Worker-only boundary. The M1 provider/model request contract is fixed by LLD-03 and is not a free deployment choice.
+The access hostname, access proxy, storage paths, initial PVC requests, backup target, and local image-delivery method are fixed above. Application images use immutable commit-derived tags. The installed K3s version is a host-owned prerequisite: the repository does not currently pin an exact K3s patch version or validate it during preflight, so the operator must confirm compatibility before deployment. Database/object-store passwords remain deployment inputs and never enter the repository. A future OpenAI credential must follow the LLD-03 Worker-only boundary. The M1 provider/model request contract is fixed by LLD-03 and is not a free deployment choice.
 
 Official references used to freeze this profile:
 

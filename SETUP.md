@@ -63,7 +63,7 @@ npm run test:e2e
 
 Integration testing and Phase 1 deployment run directly on the approved home Linux server. macOS remains suitable for UI and unit tests, but it is not a Kubernetes integration environment.
 
-The server must have Docker, native K3s, `openssl`, `curl`, `findmnt`, `git`, and `sudo`. The 1 TB SSD must be mounted at `/data`. Configure K3s before deployment:
+The server must have Docker, native K3s, `openssl`, `curl`, `findmnt`, `git`, and `sudo`. The repository does not currently pin or preflight an exact K3s patch version; treat the installed version as a host-owned prerequisite and confirm its compatibility before deployment. The 1 TB SSD must be mounted at `/data`. Configure K3s before deployment:
 
 ```yaml
 # /etc/rancher/k3s/config.yaml
