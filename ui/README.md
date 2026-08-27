@@ -20,11 +20,11 @@ npm run dev
 
 The browser calls the LLD-02 FastAPI paths directly. `/tasks` uses the system-level `GET /v1/tasks` collection and loads full Attempt history from the existing per-Task endpoint only when a project is expanded. It never adds an application `Authorization` header and never receives database, object-store, or provider credentials.
 
-When the site runs on `localhost`, `127.0.0.1`, or `::1`, it automatically uses
-an in-browser demo adapter so the complete UI can be explored before FastAPI is
-available. The demo persists only synthetic project metadata in browser storage,
-simulates upload/generation, and never calls an image provider. Set
-`demoMode: false` in runtime config to exercise the deployed real backend instead.
+The committed `public/app-config.js` sets `demoMode: true`, so the local site uses
+an in-browser demo adapter before FastAPI is available. The demo persists only
+synthetic project metadata in browser storage, simulates upload/generation, and
+never calls an image provider. The K3s ConfigMap replaces this file with
+`demoMode: false` to exercise the deployed real backend.
 
 ## Run the real Linux stack
 
@@ -34,7 +34,7 @@ The initial server verification uses generated in-cluster PostgreSQL/MinIO Secre
 
 ## Browser-safe runtime config
 
-`public/app-config.js` is the deploy-time configuration surface:
+`public/app-config.js` is the safe local fallback configuration:
 
 ```js
 window.__AI_ARTIST_CONFIG__ = Object.freeze({
@@ -42,11 +42,13 @@ window.__AI_ARTIST_CONFIG__ = Object.freeze({
   apiBaseUrl: "",
   assetBaseUrl: "",
   maxPhotos: 5,
-  demoMode: false,
+  demoMode: true,
 });
 ```
 
-An empty `apiBaseUrl` uses the current origin, matching the canonical Tailscale routing profile. Do not place secrets in this file.
+An empty `apiBaseUrl` uses the current origin. The Kubernetes
+`ai-artist-ui-runtime` ConfigMap mounts the home profile with `demoMode: false`
+at the same path. Do not place secrets in either file.
 
 ## Verify
 
@@ -59,4 +61,8 @@ npm run test:e2e
 AI_ARTIST_LIVE_URL=https://tongjin-server.tail910d5f.ts.net npm run test:e2e:live
 ```
 
-The default Playwright test intercepts the fixed LLD-02 contract. `test:e2e:live` runs the same customer workflow against the Linux server's real fake-provider stack.
+The default Playwright command builds the production Next.js application, starts
+it on `127.0.0.1:3100`, and intercepts the fixed LLD-02 contract. This avoids
+development-server compilation races between desktop and mobile projects.
+`test:e2e:live` runs the same customer workflow against the Linux server's real
+fake-provider stack.

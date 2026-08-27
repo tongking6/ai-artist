@@ -5,16 +5,16 @@
 | Field | Value |
 | --- | --- |
 | LLD | LLD-05 |
-| Product milestone | M1: Memory Product Pack Agent |
+| Product milestone | M1: Memory Postcard Studio |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Implementation-ready; home deployment profile finalized |
+| Status | Home manifests implemented; fake-provider verification path active, OpenAI adapter pending |
 | Scope owner | Home Kubernetes runtime, Tailscale access boundary, private storage, queued-Attempt delivery, OpenAI access, and retention |
 
 ## Purpose
 
 LLD-05 defines the minimum Phase 1 runtime and security posture for the M1 `Task` -> `Attempt` -> postcard artifact workflow.
 
-Phase 1 runs on a home Linux server with a single-node K3s cluster. The complete customer workflow is available only to authorized devices in the owner's Tailscale tailnet. LAN devices use the same Tailscale URL rather than a separate LAN ingress. The Generation Worker calls the OpenAI Image API over outbound HTTPS using a server-side API key; the home server does not run an AI model.
+Phase 1 runs on a home Linux server with a single-node K3s cluster. The complete customer workflow is available only to authorized devices in the owner's Tailscale tailnet. LAN devices use the same Tailscale URL rather than a separate LAN ingress. The implemented Generation Worker currently uses the deterministic fake provider. The target OpenAI adapter will call the Image API over outbound HTTPS using a server-side API key; the home server will not run an AI model.
 
 Initial integration verification runs directly on this Linux K3s runtime with the deterministic fake provider. Provider-cost and credential-dependent checks begin only after the real Website, API, PostgreSQL, MinIO, Worker, artifact, and download flow passes through the tailnet origin.
 
@@ -29,7 +29,7 @@ AWS remains a possible later deployment target. M1 domain contracts must therefo
 - PostgreSQL Task/Asset/Attempt/Artifact metadata and durable queued Attempts.
 - Private S3-compatible object storage, with MinIO as the default Phase 1 implementation.
 - Short-lived upload/download constraints.
-- Kubernetes Secret handling for `OPENAI_API_KEY`.
+- A target Generation Worker-only Secret boundary for `OPENAI_API_KEY`; no provider key exists in the current fake-provider deployment.
 - Basic container logging and failed-Attempt visibility.
 - Attempt retention with no automatic cleanup.
 - Minimum persistence and backup posture for private photos and generated artifacts.
@@ -59,7 +59,9 @@ flowchart LR
   DB -->|queued Attempt| GW["Generation Worker Deployment"]
   GW --> OS
   GW --> DB
-  GW -->|outbound HTTPS| P["OpenAI Image API"]
+  GW --> PB["GenerationProvider"]
+  PB --> FP["Current fake-v1"]
+  PB -. target outbound HTTPS .-> P["OpenAI Image API"]
 ```
 
 Phase 1 components are:
@@ -72,7 +74,7 @@ Phase 1 components are:
 | Backend API | `Deployment` + `Service`, one replica | Own customer APIs, metadata validation, object links, and queued Attempt creation. |
 | PostgreSQL | `StatefulSet` + `PersistentVolumeClaim`, one replica | Store the four normative tables; queued Attempt rows are the durable work queue. |
 | Object store | MinIO or compatible `StatefulSet` + `PersistentVolumeClaim`, one replica | Store source uploads and postcard artifacts. |
-| Generation Worker | `Deployment`, one replica | Claim queued Attempts, call the configured external provider, verify output, and finalize Attempt state. |
+| Generation Worker | `Deployment`, one replica | Claim queued Attempts, call the configured generation provider, verify output, and finalize Attempt state. |
 
 All workloads run in one `ai-artist` namespace. Phase 1 assumes planned downtime during node, cluster, database, object-store, or application maintenance.
 
@@ -169,18 +171,20 @@ MinIO is the default Phase 1 implementation because it provides the required S3-
 
 Provider-specific calls remain behind the LLD-03 `GenerationProvider` interface.
 
-Phase 1 rules:
+Current implementation rules:
 
-- `AI_ARTIST_GENERATION_PROVIDER` selects `openai` or `fake`.
-- `openai` calls the OpenAI Image API over outbound HTTPS using the fixed LLD-03 request contract.
-- The official OpenAI Python client is configured with `max_retries=0`; the Worker, HTTP transport, Ingress, and service mesh do not retry provider calls.
-- `fake` is allowed for deterministic local tests and smoke verification, not as the normal household generation mode.
-- The production model is fixed to `gpt-image-2-2026-04-21`; Anthropic and other adapters are deferred.
+- `AI_ARTIST_GENERATION_PROVIDER` is fixed to `fake`.
+- `fake-v1` provides deterministic local, CI, and native K3s workflow verification without a provider credential.
 - The home Kubernetes cluster does not download or serve foundation-model weights.
-- Source photos, title, note, style, and refinement content may leave the home network when sent to the selected provider. The UI or operator documentation must make that boundary clear before non-fixture use.
 - Provider responses still pass LLD-03 minimum output verification before an Attempt becomes `ready`.
 
-The server requires outbound DNS and HTTPS access to the selected provider. No inbound connection from the provider is required.
+Target external-provider rules:
+
+- A future `openai` adapter calls the OpenAI Image API over outbound HTTPS using the fixed LLD-03 request contract.
+- The official OpenAI Python client uses `max_retries=0`; the Worker, HTTP transport, Ingress, and service mesh do not retry provider calls.
+- The target model is fixed to `gpt-image-2-2026-04-21`; Anthropic and other adapters are deferred.
+- Source photos, title, note, style, and refinement content may leave the home network. The UI or operator documentation must make that boundary clear before non-fixture use.
+- The server requires outbound DNS and HTTPS; no inbound provider connection is required.
 
 ## Phase 1 Application Access
 
@@ -198,14 +202,14 @@ The Tailscale network boundary is an explicit Phase 1 simplification. It does no
 
 ## Secrets And Workload Boundaries
 
-API keys are created directly in the cluster as Kubernetes Secrets or supplied through an equivalent local secret-management workflow.
+The current fake-provider deployment has no AI-provider key. Future API keys are created directly in the cluster as Kubernetes Secrets or supplied through an equivalent local secret-management workflow.
 
 Rules:
 
 - Never commit API keys, `.env` files, or Secret manifests containing real values.
 - The Website Deployment receives no provider API key.
 - The Backend API does not need provider API keys unless a later contract explicitly requires it.
-- Only the Generation Worker receives `OPENAI_API_KEY`.
+- After the OpenAI adapter is implemented, only the Generation Worker may receive `OPENAI_API_KEY`.
 - Kubernetes Secret values are sensitive even though their manifest encoding may be base64; restrict namespace RBAC and host access accordingly.
 - Logs must not include keys, presigned URLs, raw photos, full prompts, or unnecessary private notes.
 
@@ -251,13 +255,10 @@ Generation Worker configuration:
 
 | Config | Purpose |
 | --- | --- |
-| AI_ARTIST_GENERATION_PROVIDER | `openai` for household generation or `fake` for deterministic tests. |
-| AI_ARTIST_OPENAI_IMAGE_MODEL | Fixed at `gpt-image-2-2026-04-21`. |
-| AI_ARTIST_OPENAI_IMAGE_QUALITY | Fixed at `medium`. |
-| AI_ARTIST_OPENAI_PROVIDER_SIZE | Fixed at `1808x1200`; LLD-03 center-crops to `1800x1200`. |
-| AI_ARTIST_PROVIDER_TIMEOUT_SECONDS | Fixed at 480 seconds for M1. |
-| OPENAI_API_KEY | OpenAI credential, supplied only to the Generation Worker when `openai` is selected. |
+| AI_ARTIST_GENERATION_PROVIDER | Fixed at `fake` in the current implementation. |
 | AI_ARTIST_LOG_LEVEL | Basic log verbosity. |
+
+LLD-03 separately fixes the future OpenAI model, quality, provider size, timeout, zero-retry rule, and Worker-only `OPENAI_API_KEY` boundary. Those settings are not current deployment inputs.
 
 ## Minimum Observability
 
@@ -318,6 +319,8 @@ Kubernetes resource names, PostgreSQL row IDs, MinIO-specific APIs, AWS ARNs, SQ
 
 ## Acceptance Checks
 
+Checks that mention the OpenAI SDK, external-provider traffic, or `OPENAI_API_KEY` are target gates for the pending adapter. They are not evidence that the current fake-provider foundation already supports OpenAI.
+
 - The website, `/v1` API, and path-style presigned upload/download URLs work through `https://tongjin-server.tail910d5f.ts.net` from an authorized tailnet device.
 - A LAN-only device without approved Tailscale access cannot reach the application.
 - Tailscale Serve is persistent, Tailscale Funnel is disabled, and no router port forwarding or Internet-facing load balancer is required.
@@ -342,7 +345,7 @@ Kubernetes resource names, PostgreSQL row IDs, MinIO-specific APIs, AWS ARNs, SQ
 
 ## Deployment Parameters
 
-The Kubernetes distribution, access hostname, access proxy, storage paths, initial PVC requests, backup target, and local image-delivery method are fixed above. The implementation pins an exact supported K3s patch version and immutable application-image tags when the scaffold is created. Secret values, including the OpenAI account credential and database/object-store passwords, remain deployment inputs and never enter the repository. The M1 provider/model request contract is fixed by LLD-03 and is not a free deployment choice.
+The Kubernetes distribution, access hostname, access proxy, storage paths, initial PVC requests, backup target, and local image-delivery method are fixed above. The implementation pins an exact supported K3s patch version and immutable application-image tags when the scaffold is created. Database/object-store passwords remain deployment inputs and never enter the repository. A future OpenAI credential must follow the LLD-03 Worker-only boundary. The M1 provider/model request contract is fixed by LLD-03 and is not a free deployment choice.
 
 Official references used to freeze this profile:
 

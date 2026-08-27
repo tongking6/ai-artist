@@ -5,9 +5,9 @@
 | Field | Value |
 | --- | --- |
 | LLD | LLD-03 |
-| Product milestone | M1: `Memory Product Pack Agent` |
+| Product milestone | M1: `Memory Postcard Studio` |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Implementation-ready; provider and prompt contracts finalized |
+| Status | Fake provider implemented; OpenAI provider and prompt contract pending implementation |
 | Scope owner | Postcard generation, minimum output verification, artifact metadata, and Attempt status updates |
 
 ## Purpose
@@ -16,13 +16,19 @@ LLD-03 defines the internal worker that turns one immutable Attempt snapshot and
 
 The worker is not customer-facing. It atomically claims a queued Attempt from PostgreSQL, reads its immutable inputs, generates one artifact, performs deterministic minimum verification, writes artifact metadata, and directly updates the Attempt status.
 
+## Implementation Status
+
+The current repository implements `GenerationProvider`, `FakeGenerationProvider`, provider-neutral Worker execution, normalization, lease fencing, Artifact persistence, and failure handling. The runnable setting is exactly `AI_ARTIST_GENERATION_PROVIDER=fake`.
+
+The OpenAI request, prompt, credential, and zero-retry sections below are target contracts for a separate implementation slice. The repository does not yet contain the OpenAI SDK dependency or adapter, and current setup must not advertise `openai` as an available provider.
+
 ## In Scope
 
 - Durable queued-Attempt claiming with lease fencing.
 - Attempt execution and status updates.
 - Reading the Attempt `input_snapshot` JSONB value.
 - Reading 1 to 5 private source photos.
-- A provider boundary with one M1 production adapter: OpenAI Image API.
+- A provider boundary with an implemented deterministic fake adapter and a target OpenAI Image API adapter.
 - Fixed `gpt-image-2-2026-04-21` model and image-edit request contract.
 - Deterministic fake provider for development, tests, and smoke verification.
 - Deterministic provider-output normalization to the postcard dimensions.
@@ -162,13 +168,13 @@ class GenerationProvider(Protocol):
         ...
 ```
 
-`GeneratePostcardInput` includes the input snapshot and 1 to 5 decoded/source asset references. `GeneratedImage` contains provider PNG bytes plus the narrow provider metadata needed for internal logs. The configured provider is `openai` for normal Phase 1 household use; `fake` is reserved for deterministic tests and smoke verification.
+`GeneratePostcardInput` includes the input snapshot and 1 to 5 decoded/source asset references. `GeneratedImage` contains provider PNG bytes plus the narrow provider metadata needed for internal logs. The implemented provider is `fake`; `openai` becomes the normal household target only after its adapter readiness checks pass.
 
-The worker calls OpenAI over outbound HTTPS using the official Python SDK and a Kubernetes Secret. It does not run foundation-model weights on the home server. Provider credentials, raw responses, and full prompts must not be written to artifacts or logs.
+The target adapter calls OpenAI over outbound HTTPS using the official Python SDK and a Kubernetes Secret. It does not run foundation-model weights on the home server. Provider credentials, raw responses, and full prompts must not be written to artifacts or logs.
 
 The OpenAI client must be constructed with `OpenAI(max_retries=0, timeout=480.0)`. No HTTP wrapper, sidecar, or service mesh may add provider-call retries. This overrides the Python SDK default retry behavior and makes one Worker invocation equal one outbound provider attempt.
 
-### Fixed OpenAI Request
+### Target OpenAI Request
 
 M1 uses the Image API edit endpoint because generation is grounded in 1 to 5 customer photos:
 
@@ -373,15 +379,15 @@ LLD-03 provides:
 - Failure and lease expiry never return an Attempt to `queued`.
 - A late Worker response cannot overwrite an expired or failed Attempt.
 - The fake provider runs without external credentials.
-- The OpenAI adapter uses `gpt-image-2-2026-04-21` through `/v1/images/edits`, sends all 1 to 5 photos, requests one `medium`-quality `1808x1200` PNG, and receives its API key only from a server-side Secret.
-- The OpenAI SDK is configured with `max_retries=0`; no other transport layer retries the request.
+- Before the target adapter is declared complete, it uses `gpt-image-2-2026-04-21` through `/v1/images/edits`, sends all 1 to 5 photos, requests one `medium`-quality `1808x1200` PNG, and receives its API key only from a server-side Secret.
+- Before the target adapter is declared complete, the OpenAI SDK is configured with `max_retries=0`; no other transport layer retries the request.
 - The Worker center-crops the provider output to `1800x1200` before minimum verification.
 - No foundation model runs on the home server.
 - No ZIP, PDF, multi-artifact, marketplace, POD, NFT, or publishing side effect is introduced.
 
 ## Provider Configuration
 
-`AI_ARTIST_GENERATION_PROVIDER` may be `openai` or `fake`. The production model, quality, provider output size, normalized output size, and no-retry rule are fixed M1 contracts. `OPENAI_API_KEY` is the only provider credential and remains a deployment Secret.
+The current repository accepts only `AI_ARTIST_GENERATION_PROVIDER=fake`. A future OpenAI implementation may add `openai` after the adapter, dependency, tests, and Generation Worker-only Secret boundary are present. The target model, quality, provider output size, normalized output size, and no-retry rule remain fixed M1 design contracts rather than current deployment toggles.
 
 Official references used to freeze this contract:
 

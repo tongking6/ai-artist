@@ -9,6 +9,16 @@ permissions:
   contents: read
 
 jobs:
+  repository:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: git diff --check 4b825dc642cb6eb9a060e54bf8d69288fbee4904 HEAD
+      - run: bash -n scripts/linux-k3s.sh
+      - run: ./scripts/linux-k3s.sh render > "$RUNNER_TEMP/ai-artist-rendered.yaml"
+      - run: test -s "$RUNNER_TEMP/ai-artist-rendered.yaml"
+
   backend:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -44,6 +54,7 @@ jobs:
       - run: ruff check .
       - run: mypy src
       - run: pytest
+      - run: docker build --tag ai-artist-backend:ci .
 
   ui:
     runs-on: ubuntu-24.04
@@ -64,4 +75,5 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      - run: npx playwright test
+      - run: docker build --tag ai-artist-ui:ci .

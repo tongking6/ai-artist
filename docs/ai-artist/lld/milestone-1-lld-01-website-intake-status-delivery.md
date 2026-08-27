@@ -5,7 +5,7 @@
 | Field | Value |
 | --- | --- |
 | LLD | LLD-01 |
-| Product milestone | M1: `Memory Product Pack Agent` |
+| Product milestone | M1: `Memory Postcard Studio` |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
 | Status | Implementation-ready; UX and access contracts finalized |
 | Scope owner | Customer website intake, upload UX, status UX, refinement UX, and artifact delivery |

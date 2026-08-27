@@ -4,20 +4,20 @@
 
 | Field | Value |
 | --- | --- |
-| Product milestone | M1: Memory Product Pack Agent |
+| Product milestone | M1: Memory Postcard Studio |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Implementation-ready; active M1 LLD contracts finalized |
+| Status | Active contracts; fake-provider foundation implemented, OpenAI adapter pending |
 | Scope | Website Task intake, postcard generation, minimum runtime, and private artifact download |
 
 ## Active LLD Set
 
 | LLD | Title | Status |
 | --- | --- | --- |
-| [LLD-00](./milestone-1-lld-00-implementation-foundation.md) | Implementation Foundation | Implementation-ready |
+| [LLD-00](./milestone-1-lld-00-implementation-foundation.md) | Implementation Foundation | Implemented foundation |
 | [LLD-01](./milestone-1-lld-01-website-intake-status-delivery.md) | Website Task Intake, Status, Refinement, and Delivery UX | Implementation-ready; UX and access contracts finalized |
 | [LLD-02](./milestone-1-lld-02-backend-api-lifecycle.md) | Backend API, Task Data Model, Attempts, Upload/Download Links | Implementation-ready; schema and API finalized |
-| [LLD-03](./milestone-1-lld-03-generation-worker.md) | Postcard Generation Worker and Minimum Verification | Implementation-ready; provider and prompt contracts finalized |
-| [LLD-05](./milestone-1-lld-05-runtime-security-ops.md) | Home Kubernetes Runtime, Storage, Security, and Attempt Queue | Implementation-ready; home deployment profile finalized |
+| [LLD-03](./milestone-1-lld-03-generation-worker.md) | Postcard Generation Worker and Minimum Verification | Fake provider implemented; OpenAI target contract pending implementation |
+| [LLD-05](./milestone-1-lld-05-runtime-security-ops.md) | Home Kubernetes Runtime, Storage, Security, and Attempt Queue | Home manifests implemented; deployment evidence remains environment-owned |
 
 [LLD-04](./milestone-1-lld-04-qa-packaging-delivery.md) is deferred and is not part of the M1 execution path.
 
@@ -79,7 +79,7 @@ tasks/{task_id}/
 - LLD-03 directly updates Attempt status and advances the owning `tasks.updated_at` for Task-center ordering.
 - LLD-03 generates exactly one `1800x1200` PNG.
 - LLD-03 performs minimum verification before setting `ready`.
-- LLD-03 makes at most one OpenAI Image API call per Attempt using `gpt-image-2-2026-04-21`; the fake provider remains available for deterministic tests.
+- LLD-03 makes at most one provider call per Attempt. The current runtime uses deterministic `fake-v1`; the target OpenAI adapter will use `gpt-image-2-2026-04-21` after it is implemented and verified.
 - LLD-03 uses the versioned `m1.postcard_prompt.v1` recipe: source-photo order has no product meaning; recognizable identity and major scene anchors are preserved; scene-aware creative recomposition is allowed; customer text is visual guidance and is not rendered into the image; refinement guidance supplements the base recipe.
 - The OpenAI adapter requests a `1808x1200` PNG and the Worker deterministically center-crops it to the fixed `1800x1200` artifact contract.
 - A claimed Attempt is never automatically retried or returned to `queued` in M1.
@@ -113,7 +113,7 @@ Customer download is a fresh short-lived URL for a ready postcard Artifact only.
 2. LLD-02 Task/Asset/Attempt persistence and customer API.
 3. LLD-05 single-node home K3s runtime, Tailscale access, PostgreSQL, private S3-compatible storage, and single-delivery Attempt claiming.
 4. LLD-01 website intake, upload, status, refinement, and download UX.
-5. LLD-03 OpenAI generation, deterministic fake-provider tests, normalization, and minimum verification.
+5. LLD-03 fake-provider generation, normalization, minimum verification, then the separate OpenAI adapter readiness slice.
 6. End-to-end verification for one-photo, five-photo, refinement, terminal failure, and artifact download flows.
 
 ## Deferred Features

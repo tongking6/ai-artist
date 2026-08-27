@@ -298,9 +298,6 @@ def run_once(settings: Settings, object_store: ObjectStore) -> bool:
         claimed = claim_attempt(session, settings)
     if claimed is None:
         return False
-    if settings.generation_provider != "fake":
-        finalize_failed(claimed)
-        return True
     process_claimed_attempt(
         claimed,
         settings=settings,

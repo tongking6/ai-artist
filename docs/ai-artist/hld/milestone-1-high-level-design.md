@@ -4,17 +4,17 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Implementation-ready M1 scope; detailed contracts live in the LLD set |
+| Status | Active M1 target; fake-provider foundation implemented, OpenAI adapter pending |
 | Owner | Codex |
-| Product milestone | M1: `Memory Product Pack Agent` |
+| Product milestone | M1: `Memory Postcard Studio` |
 | Primary source | Product direction only; the reconciled LLDs are authoritative for implementation contracts |
-| Current design direction | Tailnet-only home K3s postcard generation with external AI APIs |
+| Current design direction | Tailnet-only home K3s postcard generation; deterministic fake provider implemented first |
 
 ## 1. Executive Summary
 
 M1 is a narrow website-first workflow. A user creates a `Task`, uploads 1 to 5 photos, and provides a title, note, and style. The system creates one or more immutable generation `Attempt`s, each with a complete input snapshot. Attempt 1 has no refinement note; every later Attempt requires one. Each successful Attempt produces exactly one `1800x1200` postcard PNG.
 
-M1 proves the intake -> upload -> asynchronous generation -> status -> download loop on a home Linux server running a single-node K3s cluster. It is accessible only to approved devices in the owner's Tailscale tailnet through one canonical HTTPS hostname. AI inference runs through the OpenAI Image API; the home server does not host a model. M1 intentionally does not implement a product pack, rights workflow, automated QA gate, packaging, accounts, payments, marketplace publishing, POD, NFT, email delivery, public Internet access, or high availability.
+M1 proves the intake -> upload -> asynchronous generation -> status -> download loop on a home Linux server running a single-node K3s cluster. It is accessible only to approved devices in the owner's Tailscale tailnet through one canonical HTTPS hostname. The implemented foundation currently uses the deterministic fake provider. The target external-provider contract uses the OpenAI Image API without hosting a model on the home server, but that production adapter is not implemented yet. M1 intentionally does not implement a product pack, rights workflow, automated QA gate, packaging, accounts, payments, marketplace publishing, POD, NFT, email delivery, public Internet access, or high availability.
 
 Implementation details and field-level contracts are owned by [LLD-00](../lld/milestone-1-lld-00-implementation-foundation.md), [LLD-01](../lld/milestone-1-lld-01-website-intake-status-delivery.md), [LLD-02](../lld/milestone-1-lld-02-backend-api-lifecycle.md), [LLD-03](../lld/milestone-1-lld-03-generation-worker.md), and [LLD-05](../lld/milestone-1-lld-05-runtime-security-ops.md). [LLD-04](../lld/milestone-1-lld-04-qa-packaging-delivery.md) is deferred.
 
@@ -30,7 +30,7 @@ Implementation details and field-level contracts are owned by [LLD-00](../lld/mi
 | Refinement | Only `refinement_note` is mutable between Attempts |
 | Output | One `1800x1200` `image/png` postcard per successful Attempt |
 | Application stack | Next.js, React, and TypeScript frontend; Python FastAPI backend and Python Worker |
-| Provider | OpenAI Image API with `gpt-image-2-2026-04-21`; deterministic fake provider for tests |
+| Provider | Current: deterministic `fake-v1`; target: OpenAI Image API with `gpt-image-2-2026-04-21` after adapter readiness |
 | Runtime | Single-node K3s on the approved home Linux server |
 | Network exposure | Authorized Tailscale tailnet only through persistent Serve; no Funnel, public ingress, or router port forwarding |
 | Async delivery | Queued Attempt rows in PostgreSQL; one claim and no automatic retry per Attempt |
@@ -101,7 +101,9 @@ flowchart LR
   API --> DB[PostgreSQL]
   API --> O
   DB --> GW[Generation Worker Deployment]
-  GW --> P[OpenAI Image API]
+  GW --> P[GenerationProvider]
+  P --> F[Current fake-v1]
+  P -. target .-> OAI[OpenAI Image API]
   GW --> O
   GW --> DB
 ```
@@ -125,7 +127,7 @@ Runtime responsibilities:
 4. The user selects `Done adding photos`; the backend validates title, note, style, 1–5 uploaded Assets, and no pending slots, then sets the Task to `ready`.
 5. `Generate` calls the common Attempt-creation endpoint and creates Attempt 1 with a complete immutable snapshot and status `queued`.
 6. The backend atomically inserts the queued Attempt with fixed provider/model and updates `tasks.current_attempt_id` in PostgreSQL.
-7. The Generation Worker claims the Attempt once, calls the OpenAI `gpt-image-2-2026-04-21` adapter once, normalizes the provider image to the fixed postcard dimensions, performs minimum output verification, writes Artifact metadata, and directly updates the Attempt to `ready` or `failed`.
+7. The Generation Worker claims the Attempt once, calls the configured provider once, normalizes the provider image to the fixed postcard dimensions, performs minimum output verification, writes Artifact metadata, and directly updates the Attempt to `ready` or `failed`. The implemented path uses `fake-v1`; the target OpenAI adapter remains pending.
 8. The browser polls Task metadata or Attempt history.
 9. For a ready Artifact, the backend returns only a short-lived presigned download URL.
 10. A refinement calls the same Attempt-creation endpoint with only `refinement_note` and creates a later Attempt after no Attempt is `queued` or `generating`.
@@ -163,8 +165,8 @@ Storage references remain internal. Customer APIs expose artifact metadata and, 
 - `task_id` is a resource identifier, not an authorization credential. Authentication and authorization must be added before any future public exposure.
 - Uploads accept only JPEG/PNG, up to 20 MB per photo and 5 photos per Task.
 - Upload and download URLs have a default TTL of 15 minutes.
-- `OPENAI_API_KEY` is a server-side Kubernetes Secret, is never committed or returned to the browser, and is available only to the Generation Worker.
-- The home server needs outbound HTTPS access to the selected AI provider; no AI model runs locally.
+- The current fake-provider runtime receives no AI-provider credential. A future `OPENAI_API_KEY` must be a server-side Kubernetes Secret available only to the Generation Worker and never committed or returned to the browser.
+- External-provider operation will require outbound HTTPS; no AI model runs locally.
 - The Generation Worker cannot issue customer download URLs or modify unrelated Tasks.
 - Phase 1 uses one Kubernetes node and one replica per stateful or worker component; planned downtime and node failure are accepted.
 - M1 does not implement application-data cleanup, archive, or complex recovery.
@@ -183,5 +185,5 @@ The reconciled LLD set is the implementation source of truth:
 2. LLD-02: Task/Asset/Attempt persistence and customer APIs.
 3. LLD-05: tailnet-only home K3s runtime, PostgreSQL, private object storage, single-delivery Attempt claiming, secrets, and security.
 4. LLD-01: website intake, upload, status, refinement, and download UX.
-5. LLD-03: OpenAI generation, deterministic fake-provider tests, normalization, and minimum verification.
+5. LLD-03: implemented fake-provider generation plus the pending OpenAI target contract, normalization, and minimum verification.
 6. End-to-end verification for one-photo, five-photo, refinement, terminal failure, and artifact download flows.
