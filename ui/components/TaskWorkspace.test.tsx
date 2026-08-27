@@ -64,6 +64,25 @@ describe("TaskWorkspace", () => {
     vi.restoreAllMocks();
   });
 
+  it("discloses the OpenAI image-generation data transfer before creating an attempt", async () => {
+    const readyForGeneration: TaskView = { ...readyTask, current_attempt: null };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const payload = String(input).endsWith("/attempts")
+        ? { attempts: [] }
+        : readyForGeneration;
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    render(<TaskWorkspace taskId="task_01JDEMO" />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create postcard" })).toBeVisible());
+    expect(screen.getByText(/photos, title, note, and refinement guidance will be sent to/i)).toBeVisible();
+    expect(screen.getByText(/OpenAI for image generation/i)).toBeVisible();
+  });
+
   it("keeps task input and attempt generation statuses visibly separate", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);

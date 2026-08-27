@@ -796,6 +796,10 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                       <span><strong>Warm handmade</strong> style</span>
                       <span><strong>1800 × 1200</strong> PNG</span>
                     </div>
+                    <p>
+                      Your selected photos, title, note, and refinement guidance will be sent to
+                      OpenAI for image generation.
+                    </p>
                     <button
                       className="button button-primary button-large"
                       disabled={isCreatingAttempt}
