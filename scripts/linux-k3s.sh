@@ -5,9 +5,11 @@ set -euo pipefail
 namespace="ai-artist"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
-storage_class="ai-artist-local-path"
+storage_class="ai-artist-owned-local-path"
 storage_root="/data/ai-artist/k3s-storage"
 storage_path_pattern='{{ .PVC.Namespace }}/{{ .PVC.Name }}/{{ .PVName }}/'
+storage_provisioner="ai-artist.io/local-path"
+storage_provisioner_deployment="ai-artist-local-path-provisioner"
 image_tag=""
 ui_image=""
 backend_image=""
@@ -106,8 +108,8 @@ verify_storage_class() {
   provisioner="$(kube get storageclass "$storage_class" -o jsonpath='{.provisioner}')"
   node_path="$(kube get storageclass "$storage_class" -o jsonpath='{.parameters.nodePath}')"
   path_pattern="$(kube get storageclass "$storage_class" -o jsonpath='{.parameters.pathPattern}')"
-  if [[ "$provisioner" != "rancher.io/local-path" || "$node_path" != "$storage_root" || "$path_pattern" != "$storage_path_pattern" ]]; then
-    echo "StorageClass $storage_class must be the repo-owned rancher.io/local-path class rooted at $storage_root." >&2
+  if [[ "$provisioner" != "$storage_provisioner" || "$node_path" != "$storage_root" || "$path_pattern" != "$storage_path_pattern" ]]; then
+    echo "StorageClass $storage_class must be the repo-owned $storage_provisioner class rooted at $storage_root." >&2
     echo "Back up required data and reconcile the StorageClass/PVCs manually; deployment will not migrate or delete existing volumes." >&2
     exit 1
   fi
@@ -211,6 +213,7 @@ deploy() {
   build_and_import_images
   kube apply -k "$render_root/overlays/home"
   verify_storage_class
+  kube rollout status "deployment/$storage_provisioner_deployment" -n "$namespace" --timeout=300s
   kube rollout restart deployment/backend-api deployment/generation-worker deployment/website -n "$namespace"
   kube rollout status statefulset/postgresql -n "$namespace" --timeout=300s
   kube rollout status statefulset/minio -n "$namespace" --timeout=300s

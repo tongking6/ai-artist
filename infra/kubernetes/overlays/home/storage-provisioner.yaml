@@ -1,0 +1,143 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ai-artist-local-path-provisioner
+  namespace: ai-artist
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ai-artist-local-path-provisioner
+  namespace: ai-artist
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ai-artist-local-path-provisioner
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "persistentvolumeclaims", "configmaps", "pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ai-artist-local-path-provisioner
+  namespace: ai-artist
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ai-artist-local-path-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: ai-artist-local-path-provisioner
+    namespace: ai-artist
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ai-artist-local-path-provisioner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ai-artist-local-path-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: ai-artist-local-path-provisioner
+    namespace: ai-artist
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-artist-local-path-provisioner
+  namespace: ai-artist
+data:
+  config.json: |-
+    {
+      "nodePathMap": [
+        {
+          "node": "DEFAULT_PATH_FOR_NON_LISTED_NODES",
+          "paths": ["/data/ai-artist/k3s-storage"]
+        }
+      ]
+    }
+  setup: |-
+    #!/bin/sh
+    set -eu
+    mkdir -m 0777 -p "$VOL_DIR"
+  teardown: |-
+    #!/bin/sh
+    set -eu
+    rm -rf "$VOL_DIR"
+  helperPod.yaml: |-
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: helper-pod
+    spec:
+      priorityClassName: system-node-critical
+      tolerations:
+        - key: node.kubernetes.io/disk-pressure
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: helper-pod
+          image: busybox:1.37.0
+          imagePullPolicy: IfNotPresent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-artist-local-path-provisioner
+  namespace: ai-artist
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-artist-local-path-provisioner
+  template:
+    metadata:
+      labels:
+        app: ai-artist-local-path-provisioner
+    spec:
+      serviceAccountName: ai-artist-local-path-provisioner
+      containers:
+        - name: provisioner
+          image: rancher/local-path-provisioner:v0.0.34
+          imagePullPolicy: IfNotPresent
+          command:
+            - local-path-provisioner
+            - start
+            - --provisioner-name
+            - ai-artist.io/local-path
+            - --namespace
+            - ai-artist
+            - --config
+            - /etc/config/config.json
+          volumeMounts:
+            - name: config
+              mountPath: /etc/config/
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CONFIG_MOUNT_PATH
+              value: /etc/config/
+      volumes:
+        - name: config
+          configMap:
+            name: ai-artist-local-path-provisioner

@@ -18,6 +18,11 @@ jobs:
       - run: bash -n scripts/linux-k3s.sh
       - run: ./scripts/linux-k3s.sh render > "$RUNNER_TEMP/ai-artist-rendered.yaml"
       - run: test -s "$RUNNER_TEMP/ai-artist-rendered.yaml"
+      - run: |
+          grep -F 'provisioner: ai-artist.io/local-path' "$RUNNER_TEMP/ai-artist-rendered.yaml"
+          grep -F 'nodePath: /data/ai-artist/k3s-storage' "$RUNNER_TEMP/ai-artist-rendered.yaml"
+          grep -F 'storageClassName: ai-artist-owned-local-path' "$RUNNER_TEMP/ai-artist-rendered.yaml"
+          ! grep -F 'provisioner: rancher.io/local-path' "$RUNNER_TEMP/ai-artist-rendered.yaml"
 
   backend:
     runs-on: ubuntu-24.04

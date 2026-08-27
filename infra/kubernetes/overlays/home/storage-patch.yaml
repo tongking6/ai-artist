@@ -9,7 +9,7 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: ai-artist-local-path
+        storageClassName: ai-artist-owned-local-path
         resources:
           requests:
             storage: 20Gi
@@ -25,7 +25,7 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: ai-artist-local-path
+        storageClassName: ai-artist-owned-local-path
         resources:
           requests:
             storage: 500Gi

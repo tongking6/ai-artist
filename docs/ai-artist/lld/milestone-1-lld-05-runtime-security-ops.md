@@ -284,7 +284,7 @@ The finalized server and storage profile is:
 | Capacity | 8 logical CPUs and 15 GiB RAM |
 | K3s system storage | Existing NVMe root filesystem under the K3s default data path |
 | Host-wide K3s default local-storage path | Server-operator policy; not set or used by AI Artist PVCs |
-| Application StorageClass path | `/data/ai-artist/k3s-storage` on the 1 TB SSD |
+| Application storage | App-owned local-path provisioner and `ai-artist-owned-local-path` StorageClass rooted at `/data/ai-artist/k3s-storage` on the 1 TB SSD |
 | PostgreSQL PVC request | 20 GiB, one replica |
 | MinIO PVC request | 500 GiB, one replica; local-path capacity is monitored at filesystem level |
 | Backup target | `/backup/ai-artist` on the separate 2 TB HDD |
@@ -293,7 +293,7 @@ The finalized server and storage profile is:
 
 Phase 1 application images are built on the x86_64 server from a named Git commit with the existing Docker installation, exported as image archives, and imported into K3s containerd. Deployments use immutable commit-derived tags with `imagePullPolicy: IfNotPresent`. A private registry and automated release pipeline are deferred.
 
-`/etc/rancher/k3s/config.yaml` is host-wide configuration: AI Artist requires it to disable ServiceLB and restrict NodePorts to loopback, but does not require or set `default-local-storage-path`. That default remains a server-operator policy and must not be relied on for application isolation. The repo-owned `ai-artist-local-path` StorageClass uses `rancher.io/local-path` with `nodePath: /data/ai-artist/k3s-storage` and `pathPattern: "{{ .PVC.Namespace }}/{{ .PVC.Name }}/{{ .PVName }}/"`; both StatefulSets explicitly set `storageClassName`, so AI Artist does not depend on the host default. Because the reclaim policy is `Retain`, recovery must explicitly rebind the retained PV; recreating a same-named PVC provisions a new PV directory. The deployment preflight verifies `/data` is not the root filesystem; after applying the overlay it verifies the StorageClass parameters and checks every bound PV's reported `hostPath` or `local` path before declaring deployment successful. It refuses to mutate or delete legacy StorageClasses, PVCs, or PVs automatically; operators must back up data and reconcile incompatible existing storage manually.
+`/etc/rancher/k3s/config.yaml` is host-wide configuration: AI Artist requires it to disable ServiceLB and restrict NodePorts to loopback, but does not require or set `default-local-storage-path`. That default remains a server-operator policy and must not be relied on for application isolation. The repo-owned overlay deploys an isolated `ai-artist.io/local-path` provisioner in the `ai-artist` namespace, with an allowlist containing only `/data/ai-artist/k3s-storage`. Its `ai-artist-owned-local-path` StorageClass uses that provisioner with the same `nodePath` and `pathPattern: "{{ .PVC.Namespace }}/{{ .PVC.Name }}/{{ .PVName }}/"`; both StatefulSets explicitly set `storageClassName`, so AI Artist does not depend on K3s's built-in provisioner or host default. The provisioner has only the cluster-wide RBAC required to observe claims/classes/nodes and create or remove its PVs, plus namespace-local helper-pod permissions. Because the reclaim policy is `Retain`, recovery must explicitly rebind the retained PV; recreating a same-named PVC provisions a new PV directory. The deployment preflight verifies `/data` is not the root filesystem; after applying the overlay it waits for the app-owned provisioner, verifies the StorageClass parameters, and checks every bound PV's reported `hostPath` or `local` path before declaring deployment successful. It refuses to mutate or delete legacy StorageClasses, PVCs, or PVs automatically; operators must back up data and reconcile incompatible existing storage manually.
 
 Before using irreplaceable household photos:
 
@@ -334,7 +334,7 @@ Checks that mention the OpenAI SDK, external-provider traffic, or `OPENAI_API_KE
 - Lease expiry marks the Attempt failed without requeue, and conditional finalization rejects late Worker responses.
 - Failed Attempts remain inspectable with no automatic cleanup.
 - Private object storage uses persistent storage and does not allow anonymous reads or listing.
-- PostgreSQL and MinIO PVCs use `ai-artist-local-path`, and their bound PV paths resolve below `/data/ai-artist/k3s-storage` on the dedicated SSD.
+- PostgreSQL and MinIO PVCs use `ai-artist-owned-local-path`, and their bound PV paths resolve below `/data/ai-artist/k3s-storage` on the dedicated SSD.
 - Website, API, migration, and Worker Deployments reference the exact commit-derived image tag imported during the deployment.
 - Upload/download URLs are short-lived, use the canonical Tailscale hostname, and pass a real presigned POST/GET end-to-end check through Tailscale Serve and Traefik.
 - `OPENAI_API_KEY` exists only in a server-side Secret available to the Generation Worker and never reaches the browser or repository.

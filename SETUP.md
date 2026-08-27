@@ -73,7 +73,7 @@ kube-proxy-arg:
   - nodeport-addresses=127.0.0.0/8
 ```
 
-`/etc/rancher/k3s/config.yaml` is host-wide K3s configuration. AI Artist does not require or set `default-local-storage-path`; leave that host-wide policy to the server operator. The repository-owned `home` overlay creates `ai-artist-local-path` and explicitly assigns it to the PostgreSQL and MinIO PVCs. That StorageClass, rather than K3s's default local-storage path, pins AI Artist data to `/data/ai-artist/k3s-storage`.
+`/etc/rancher/k3s/config.yaml` is host-wide K3s configuration. AI Artist does not require or set `default-local-storage-path`; leave that host-wide policy to the server operator. The repository-owned `home` overlay deploys an AI Artist-only `local-path-provisioner`, then creates `ai-artist-owned-local-path` and explicitly assigns it to the PostgreSQL and MinIO PVCs. Its private allowlist and StorageClass, rather than K3s's default local-storage path or built-in provisioner configuration, pin AI Artist data to `/data/ai-artist/k3s-storage`.
 
 Restart K3s after changing the host-owned file, then deploy from a clean named Git commit on the Linux server:
 
@@ -90,7 +90,7 @@ The command:
 - verifies the repo-owned StorageClass, PVC/PV placement, running image tags, and the loopback ingress;
 - never writes credential values to the repository.
 
-The `ai-artist-local-path` StorageClass pins both application PVCs to `/data/ai-artist/k3s-storage`, independently of K3s's host-wide default local-storage path. Each provisioned directory includes the PV name. With reclaim policy `Retain`, recreating a same-named PVC creates a new directory; recovery requires explicitly rebinding the retained PV. The deployment refuses to delete or silently reuse legacy PVC data. If an existing StorageClass, PVC, or PV does not match the repo-owned path contract, deployment stops; back up the data and reconcile or explicitly rebind the retained PV before retrying.
+The `ai-artist-owned-local-path` StorageClass pins both application PVCs to `/data/ai-artist/k3s-storage`, independently of K3s's host-wide default local-storage path and built-in provisioner. Its app-owned provisioner has an allowlist containing only that directory. Each provisioned directory includes the PV name. With reclaim policy `Retain`, recreating a same-named PVC creates a new directory; recovery requires explicitly rebinding the retained PV. The deployment refuses to delete or silently reuse legacy PVC data. If an existing StorageClass, PVC, or PV does not match the repo-owned path contract, deployment stops; back up the data and reconcile or explicitly rebind the retained PV before retrying.
 
 After the loopback smoke check passes, explicitly enable persistent tailnet-only HTTPS:
 
