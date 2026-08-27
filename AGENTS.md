@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This repository is for AI Artist, an AI-assisted creative product agent that turns user-owned photos and memories into sellable digital creative goods such as sticker sheets, postcards, posters, mockups, and marketplace listing drafts.
+This repository implements AI Artist's private `Memory Postcard Studio` M1: a narrow workflow that turns user-owned photos and memories into one downloadable postcard PNG per successful generation Attempt. Broader sellable product packs and marketplace workflows remain possible future product directions, not current implementation scope.
 
 ## Language
 
@@ -10,11 +10,12 @@ This repository is for AI Artist, an AI-assisted creative product agent that tur
 
 ## Product Boundary
 
-- Treat the current source of truth as a discussion-grounded product vision, not a finished technical spec.
-- Start from user problems, creative workflow, product outputs, and channel assumptions before implementation details.
-- The recommended M1 is `Memory Product Pack Agent` for travel memory cards.
-- M1 should generate local assets and marketplace-ready drafts; it should not publish listings, create POD products, or mint NFTs automatically.
-- NFT should remain optional and downstream until the product has collector demand, brand story, scarcity, and utility.
+- Treat the active M1 source of truth as the repository code plus the current README, HLD, and reconciled LLD set.
+- The active M1 is `Memory Postcard Studio`: 1 to 5 user-owned JPEG or PNG photos, title, note, fixed `warm_handmade` style, immutable Attempts, and one `1800x1200` PNG per successful Attempt.
+- The current runnable generation provider is deterministic `fake-v1`. The OpenAI adapter is a target contract and must not be advertised or configured as implemented until its adapter, dependency, tests, and Worker-only Secret boundary exist.
+- Product packs, sticker sheets, posters, ZIP/PDF packaging, rights workflow, automated QA, listing drafts, pricing, marketplace integrations, POD, NFT, payments, and public hosting are outside active M1 scope.
+- Treat the historical product-pack PRFAQ as future product exploration rather than implementation authority.
+- Do not add external publishing, listing creation, buyer communication, fulfillment, POD product creation, or NFT minting without explicit user approval.
 
 ## Agent Behavior
 
@@ -33,9 +34,9 @@ This repository is for AI Artist, an AI-assisted creative product agent that tur
 - Compliance output is a risk checklist, not legal advice.
 - Marketplace policies can change; verify current Etsy, Shopify, POD, and NFT platform rules before launch-facing claims.
 
-## Marketplace Guardrails
+## Future Marketplace Guardrails
 
-- Etsy should be treated as the first validation channel for M1 digital product packs.
+- If product-pack validation is explicitly brought into scope later, Etsy is the preferred first validation channel for digital product packs.
 - Listing drafts should include human-created positioning, AI disclosure where relevant, file names, buyer notes, and usage instructions.
 - POD integrations such as Printful or Printify should stay draft-only until production partner, cost, margin, shipping, and mockup accuracy are reviewed.
 - Any external publishing, listing creation, buyer communication, order fulfillment, or NFT minting requires explicit user approval.
@@ -46,20 +47,15 @@ This repository is for AI Artist, an AI-assisted creative product agent that tur
 - Prefer minimal, reviewable diffs.
 - Match existing project conventions once they exist.
 - Do not introduce broad abstractions before the first workflow is working.
-- For new code, separate:
-  - intake and rights checks
-  - style recipe generation
-  - product layout generation
-  - export packaging
-  - listing draft generation
-  - quality and compliance checks
+- For active M1 code, preserve the existing boundaries between website intake/status/delivery, Task/Asset/Attempt/Artifact lifecycle, object storage, generation providers, and minimum output verification.
+- Add product layout variants, export packaging, listing drafts, rights workflow, or broader quality/compliance modules only when that future scope is explicitly requested.
 - Keep provider-specific image/model code behind a small boundary so model choices can change later.
 
 ## Verification
 
 - For docs, verify links, internal references, and Markdown readability.
 - For code, run the narrowest meaningful checks before claiming completion.
-- For generated visual output, verify image dimensions, text readability, file size, obvious artifacts, and marketplace export constraints.
+- For generated visual output, verify the fixed postcard dimensions, text readability, file size, and obvious artifacts. Verify marketplace export constraints only when marketplace work is explicitly in scope.
 - For any frontend, perform visual QA on desktop and mobile viewports.
 
 ## Git And Repo Setup

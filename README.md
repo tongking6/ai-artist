@@ -1,141 +1,113 @@
 # AI Artist
 
-AI Artist is an AI-assisted creative product agent for turning user-owned photos, themes, and memories into sellable digital creative goods: sticker sheets, postcards, posters, listing mockups, and marketplace-ready copy.
+AI Artist is a private, AI-assisted creative studio for turning user-owned photos and memories into finished visual keepsakes.
 
-The project starts from a product idea rather than a finished implementation. The first milestone should prove one complete creator workflow before expanding into marketplaces, print-on-demand, or NFT publishing.
+The current Milestone 1 is a narrow `Memory Postcard Studio`: a user adds 1 to 5 JPEG or PNG photos, a title, a creative note, and the fixed `warm_handmade` style. Each successful generation Attempt produces one downloadable `1800x1200` PNG postcard.
 
 Repository: https://github.com/tongking6/ai-artist
 
-## Product Thesis
+## Current Implementation
 
-AI Artist is not just an image generator. It is a creative product operator:
+The repository contains one end-to-end M1 foundation:
 
-> From a user's photo or memory, generate a coherent product pack that can be downloaded, printed, listed, and tested for commercial demand.
+- `ui/`: Next.js, React, and TypeScript customer website with local demo mode.
+- `services/backend/`: FastAPI customer API, PostgreSQL lifecycle, MinIO/S3-compatible storage adapter, and Generation Worker.
+- `infra/kubernetes/`: single-node home K3s manifests.
+- `scripts/linux-k3s.sh`: image build/import, deployment, runtime checks, and Tailscale Serve setup.
+- `.github/workflows/ci.yml`: frontend, backend, PostgreSQL lifecycle, and browser verification.
 
-The core value is not a single pretty image. The core value is repeatable productization:
+The runnable server path currently uses the deterministic `fake` generation provider. It exercises Browser -> API -> PostgreSQL/MinIO -> Worker -> Artifact -> download without an external AI credential. The OpenAI Image API contract is designed in LLD-03, but its production adapter is not implemented yet; do not configure `AI_ARTIST_GENERATION_PROVIDER=openai` in the current codebase.
 
-- consistent visual style
-- product-specific layouts
-- print and marketplace export formats
-- listing copy and buyer instructions
-- risk checks for IP, likeness, AI disclosure, and platform limits
+Repository code and green CI are not proof that the home server is deployed. Use the deployment and live smoke checks in [SETUP.md](./SETUP.md) before making runtime claims.
 
-## Inspiration
+## M1 Product Boundary
 
-This product direction came from two Xiaohongshu examples discussed before project setup:
+In scope:
 
-- A Codex/image skill experiment that produced a vintage paper, fine-line, postcard/poster-like city style.
-- A `travel-memory-sticker-card` example that transforms travel photos into a memory card with sticker motifs and shareable collectible energy.
+- Private access from approved Tailscale devices.
+- Create and list postcard Tasks.
+- Upload 1 to 5 user-owned JPEG or PNG photos.
+- Save title, note, and the fixed `warm_handmade` style.
+- Create immutable Attempts, inspect status/history, refine, and download any ready version.
+- Produce one fixed `1800x1200` PNG per successful Attempt.
 
-The useful signal is that users respond to reusable style systems and memory-based creative artifacts, not only raw AI-generated images.
+Not in the active M1 implementation:
 
-## M1: Memory Product Pack Agent
+- Product packs, sticker sheets, posters, PDFs, ZIP packaging, or listing kits.
+- Rights workflow, automated visual QA, or operator review.
+- Accounts, payments, pricing, public galleries, or public Internet access.
+- Etsy, Shopify, POD, NFT, publishing, fulfillment, or buyer messaging.
+- The production OpenAI adapter, high availability, or AWS deployment.
 
-The recommended first milestone core is:
+These remain possible future product directions. The older [Memory Product Pack PRFAQ](./docs/ai-artist/prfaq/milestone-1-scope.md) is retained as historical product exploration, not as the current implementation or launch promise.
 
-> User uploads 1 to 5 photos they own or have permission to use. The website/API creates a cohesive travel memory product pack with a sticker sheet, postcard, poster, and social preview.
+## Runtime Boundary
 
-M1 should optimize for one niche first:
+Phase 1 targets one home Linux server running a single-node K3s cluster:
 
-**Travel memory cards**
+- Tailscale Serve HTTPS proxies to loopback-only K3s Traefik `NodePort 30080`.
+- Tailscale Funnel, router port forwarding, public tunnels, and direct non-tailnet LAN ingress are prohibited.
+- The Website, `/v1` API, and path-style presigned upload/download URLs share one canonical tailnet hostname.
+- PostgreSQL stores Task, Asset, Attempt, and Artifact metadata.
+- MinIO stores private source photos and postcard artifacts.
+- There is no application login or Task token; the trusted household tailnet is the Phase 1 access boundary.
 
-Why this first:
+Authentication and authorization are required before any future public or non-tailnet exposure.
 
-- simple user input: travel, city walk, or lifestyle photos
-- naturally supports sticker, postcard, and poster outputs
-- lower IP risk than fan art, celebrities, brands, or fictional characters
-- easy to validate on social platforms and Etsy-style digital listings
-
-## Expected M1 Core Outputs
-
-- `sticker_sheet`
-  - printable PNG or PDF
-  - optional transparent PNG sticker exports
-
-- `postcard`
-  - 4x6 or 5x7 front design
-  - exportable PNG or PDF
-
-- `poster`
-  - common ratios such as 2:3, 3:4, and 4:5
-  - high-resolution PNG or PDF
-
-- `social_preview`
-  - shareable preview image
-  - product-pack cover image
-
-- `quality_report`
-  - output dimensions
-  - readable text check
-  - watermark/signature check
-  - print suitability notes
-  - IP/trademark/likeness checklist
-
-## Follow-Up Outputs
-
-These are useful for the broader product vision but are not core M1 deliverables:
-
-- `listing_preview`
-- `listing_kit`
-- `buyer_usage_note`
-
-## Agent Modules
-
-AI Artist can be designed as a multi-step agent system:
-
-- `Intake Agent`: collects product goal, source rights, photos, style preference, and target channel.
-- `Art Director Agent`: converts user input into a reusable style recipe.
-- `Product Designer Agent`: adapts the style into sticker, postcard, poster, and mockup layouts.
-- `Listing Agent`: writes marketplace-ready copy, tags, buyer notes, and file names.
-- `Compliance Agent`: flags IP, trademark, likeness, AI disclosure, and platform risks.
-- `Publisher Agent`: later creates marketplace drafts only after explicit user confirmation.
-
-M1 core should generate downloadable art assets. Listing drafts can follow after the core generation loop works. It should not automatically publish to Etsy, Shopify, print-on-demand, or NFT platforms.
-
-## Channel Strategy
-
-Start with digital product packs. Treat marketplace publishing as a later integration.
-
-- Etsy first: best early validation channel for printable and digital downloads.
-- Print-on-demand second: useful for sticker, poster, and postcard fulfillment after product quality is stable.
-- Own store later: Shopify or similar storefronts make sense when there is an audience or brand.
-- NFT optional: only after the style has collector demand, brand story, scarcity, and utility.
-
-## Product Guardrails
-
-- Only use user-owned, user-created, licensed, or clearly public-domain source material.
-- Avoid celebrity, fan, trademark, logo, copyrighted character, and third-party artwork workflows in M1.
-- Clearly disclose AI usage when a target platform requires it.
-- Do not claim legal advice; present compliance as a risk checklist.
-- Do not auto-publish products or mint NFTs without explicit user approval.
-- Keep output file names clear because marketplace buyers may see them directly.
-
-## M1 Repository Shape
-
-The repo is currently documentation-first. [LLD-00](./docs/ai-artist/lld/milestone-1-lld-00-implementation-foundation.md) fixes the first implementation scaffold as:
+## Repository Layout
 
 ```text
-apps/web/                    # Next.js + React + TypeScript
-services/backend/           # Python FastAPI API and Python Worker
-infra/kubernetes/           # Home Kubernetes runtime
-tests/e2e/                  # Fake-provider browser flow
+ui/                            # Next.js customer website and browser tests
+services/backend/              # FastAPI API, Worker, migrations, and Python tests
+infra/kubernetes/base/         # Shared Kubernetes resources
+infra/kubernetes/overlays/home # Home K3s storage and ingress profile
+scripts/linux-k3s.sh           # Linux deployment and diagnostic workflow
+docs/ai-artist/hld/             # Active high-level design
+docs/ai-artist/lld/             # Active implementation contracts
+docs/ai-artist/prfaq/           # Historical product exploration
 ```
 
-## Current Docs
+## Start Locally
 
-- [SETUP.md](./SETUP.md): required project, environment, marketplace, and quality settings.
-- [AGENTS.md](./AGENTS.md): instructions for future agent work in this repository.
-- [Milestone 1 PRFAQ](./docs/ai-artist/prfaq/milestone-1-scope.md): M1 customer promise, scope, pricing, success metrics, and launch assumptions.
-- [Milestone 1 HLD](./docs/ai-artist/hld/milestone-1-high-level-design.md): high-level product and technical design for the website, tailnet-only home K3s runtime, OpenAI generation, and artifact delivery model.
-- [Milestone 1 LLDs](./docs/ai-artist/lld/README.md): implementation-ready low-level design set for the Next.js/React/TypeScript frontend, Python backend, intake lifecycle, OpenAI generation, deferred QA/packaging, and Phase 1 home runtime.
+The UI can run without FastAPI by using its in-browser demo adapter:
 
-## Sources
+```bash
+cd ui
+npm ci
+npm run dev
+```
 
-- Xiaohongshu example 1: https://www.xiaohongshu.com/discovery/item/6a79fc4b0000000025000dc9
-- Xiaohongshu example 2: https://www.xiaohongshu.com/discovery/item/6a8186860000000005030018
-- `travel-memory-sticker-card`: https://github.com/carolinaaafy/travel-memory-sticker-card
-- Etsy digital listings: https://help.etsy.com/hc/en-us/articles/115015628347-How-to-Manage-Your-Digital-Listings
-- Etsy creativity standards: https://www.etsy.com/legal/creativity/
-- Etsy IP policy: https://www.etsy.com/legal/ip/
-- Shopify Digital Downloads: https://help.shopify.com/en/manual/products/digital-service-product/digital-downloads
-- OpenSea NFT creation: https://support.opensea.io/en/articles/8867023-how-do-i-create-an-nft
+Open `http://localhost:3000`. Demo mode stores synthetic project metadata only in browser storage and never calls an image provider.
+
+Run the frontend checks with:
+
+```bash
+cd ui
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run test:e2e
+```
+
+Backend and home K3s instructions are in [SETUP.md](./SETUP.md). The native K3s integration path runs on the approved Linux server rather than macOS.
+
+## Design Authority
+
+- [Milestone 1 HLD](./docs/ai-artist/hld/milestone-1-high-level-design.md): current product, system, security, and runtime boundaries.
+- [Milestone 1 LLD index](./docs/ai-artist/lld/README.md): active implementation contracts and ownership.
+- [LLD-00](./docs/ai-artist/lld/milestone-1-lld-00-implementation-foundation.md): repository shape, technology choices, and verification baseline.
+- [LLD-01](./docs/ai-artist/lld/milestone-1-lld-01-website-intake-status-delivery.md): customer UI behavior.
+- [LLD-02](./docs/ai-artist/lld/milestone-1-lld-02-backend-api-lifecycle.md): database and API lifecycle.
+- [LLD-03](./docs/ai-artist/lld/milestone-1-lld-03-generation-worker.md): target generation-provider contract and implemented fake-provider verification path.
+- [LLD-05](./docs/ai-artist/lld/milestone-1-lld-05-runtime-security-ops.md): home K3s, Tailscale, storage, secrets, and operations.
+
+Field-level contracts in the reconciled LLDs take precedence over the historical PRFAQ and earlier product-pack language.
+
+## Safety
+
+- Use only user-owned, user-created, licensed, or approved fixture photos.
+- Do not commit private photos, generated commercial outputs, credentials, presigned URLs, or Kubernetes Secret values.
+- Source photos and creative guidance may leave the home network after a future external provider adapter is enabled.
+- Keep original photos outside AI Artist and back up PostgreSQL and object storage before relying on the system for irreplaceable household photos.
+- Marketplace, POD, publishing, buyer communication, and NFT actions require explicit user approval and current policy review.

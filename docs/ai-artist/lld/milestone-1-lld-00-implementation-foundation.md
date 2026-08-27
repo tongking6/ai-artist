@@ -5,9 +5,9 @@
 | Field | Value |
 | --- | --- |
 | LLD | LLD-00 |
-| Product milestone | M1: `Memory Product Pack Agent` |
+| Product milestone | M1: `Memory Postcard Studio` |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
-| Status | Implementation-ready |
+| Status | Foundation implemented; OpenAI provider adapter pending |
 | Scope owner | Repository layout, application stack, process boundaries, and baseline verification |
 
 ## Purpose
@@ -24,7 +24,7 @@ LLD-00 fixes the implementation foundation shared by the active M1 LLDs. It does
 | Generation Worker | Python process using the same backend package and domain models as the API |
 | Persistence | PostgreSQL through SQLAlchemy 2; Alembic owns schema migrations |
 | Object storage | S3-compatible adapter using `boto3`; MinIO is the Phase 1 runtime |
-| AI provider client | Official OpenAI Python SDK with `max_retries=0`, behind the LLD-03 `GenerationProvider` boundary |
+| AI provider client | Current: deterministic fake provider; target: official OpenAI Python SDK with `max_retries=0` behind `GenerationProvider` |
 | Image decoding and normalization | Pillow |
 | Frontend tests | Vitest and React Testing Library |
 | Backend tests | pytest |
@@ -47,7 +47,7 @@ services/
       adapters/
         database/              # SQLAlchemy repositories
         object_store/          # S3-compatible ObjectStore
-        generation/            # OpenAI and deterministic fake providers
+        generation/            # GenerationProvider boundary; current fake adapter, target OpenAI adapter
     migrations/                # Alembic migrations
 infra/
   kubernetes/
@@ -87,7 +87,7 @@ Integration testing runs on the approved Linux server's native single-node K3s c
 
 - The Worker imports the same Python domain and adapter interfaces as the API.
 - It claims the PostgreSQL Attempt defined by LLD-02/05, calls the configured LLD-03 provider, normalizes and verifies the image through Pillow, and finalizes the Attempt.
-- Only the Worker receives `OPENAI_API_KEY`.
+- The current fake-provider runtime receives no provider credential. A future `OPENAI_API_KEY` may be supplied only to the Worker after the OpenAI adapter is implemented.
 - API and Worker use the same backend image but separate Kubernetes Deployments and entry commands.
 
 ## Contract Ownership

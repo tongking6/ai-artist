@@ -1,39 +1,69 @@
 # Setup And Project Settings
 
-This document records the settings used by the AI Artist implementation and its deployment profiles.
+This document records settings that are implemented by the current AI Artist M1 codebase. Future provider and product ideas are labeled separately and must not be treated as runnable configuration.
 
-## GitHub
+## Current Runtime Status
 
-Intended repository:
+The implemented server path is a deterministic fake-provider vertical slice:
 
-```bash
-git remote add origin https://github.com/tongking6/ai-artist.git
-git branch -M main
-git push -u origin main
+```text
+Browser -> FastAPI -> PostgreSQL/MinIO -> Generation Worker -> postcard.png
 ```
 
-Only run these after confirming the local repo should be connected to that GitHub remote.
+It exercises the real Task, Asset, Attempt, Artifact, upload, generation, and download lifecycle without sending photos to an external AI provider.
 
-## Phase 1 Runtime
+The OpenAI Image API contract is designed in LLD-03, but the production adapter and OpenAI SDK dependency are not implemented. The current code accepts only:
 
-Phase 1 runs on a home Linux server with a single-node K3s cluster.
+```bash
+AI_ARTIST_GENERATION_PROVIDER=fake
+```
+
+Do not configure `openai` or create `OPENAI_API_KEY` until the adapter, tests, workload Secret boundary, and owned-fixture readiness check are implemented.
+
+## Phase 1 Access Boundary
+
+Phase 1 targets a home Linux server with a single-node K3s cluster.
 
 - Access is limited to approved devices in the owner's Tailscale tailnet; home devices use the same canonical tailnet URL.
 - Use `https://tongjin-server.tail910d5f.ts.net` through persistent Tailscale Serve; never enable Tailscale Funnel.
 - Do not configure router port forwarding, UPnP exposure, public DNS, a public tunnel, or an Internet-facing load balancer.
 - K3s ServiceLB is disabled; bundled Traefik is reachable only through loopback `NodePort 30080`, behind Tailscale Serve.
 - High availability and automatic failover are not required.
-- Phase 1 has no application-layer login or Task-token authentication; approved tailnet access is the application boundary.
-- AI inference uses the outbound OpenAI Image API. The home server does not host a foundation model.
+- Phase 1 has no application login or Task token; approved tailnet access is the application boundary.
 - Keep original photos outside AI Artist and back up PostgreSQL and private object storage before relying on the system for irreplaceable household photos.
 
-AWS may be added later if public access, managed durability, scaling, or HA becomes necessary. Phase 1 application contracts must not depend on AWS SDK types or AWS resource identifiers.
+AWS remains a possible later deployment target. Current application contracts must not depend on AWS SDK types or AWS resource identifiers.
+
+## Local UI Demo
+
+Use Node.js 20.9 or newer:
+
+```bash
+cd ui
+npm ci
+npm run dev
+```
+
+The committed `ui/public/app-config.js` enables browser-local demo mode. It stores synthetic project metadata in browser storage, simulates upload/generation, and never calls FastAPI or an image provider.
+
+Run frontend verification with:
+
+```bash
+cd ui
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run test:e2e
+```
+
+`npm run test:e2e` builds and starts the production Next.js server on `127.0.0.1:3100`, then runs the mocked desktop/mobile workflow.
 
 ## Linux K3s Environment
 
 Integration testing and Phase 1 deployment run directly on the approved home Linux server. macOS remains suitable for UI and unit tests, but it is not a Kubernetes integration environment.
 
-The server must have Docker, native K3s, `openssl`, `curl`, `findmnt`, and `sudo`. The 1 TB SSD must be mounted at `/data`. K3s must be configured before deployment so ServiceLB is disabled, NodePort traffic binds only to loopback, and local-path provisioning uses the SSD:
+The server must have Docker, native K3s, `openssl`, `curl`, `findmnt`, `git`, and `sudo`. The repository does not currently pin or preflight an exact K3s patch version; treat the installed version as a host-owned prerequisite and confirm its compatibility before deployment. The 1 TB SSD must be mounted at `/data`. Configure K3s before deployment:
 
 ```yaml
 # /etc/rancher/k3s/config.yaml
@@ -44,212 +74,105 @@ kube-proxy-arg:
 default-local-storage-path: /data/ai-artist/k3s-storage
 ```
 
-Restart K3s after changing that host-owned file, then deploy from a checkout on the Linux server:
+Restart K3s after changing the host-owned file, then deploy from a clean named Git commit on the Linux server:
 
 ```bash
 ./scripts/linux-k3s.sh deploy
 ```
 
-The command requires a clean named Git commit, tags Website and Backend images with the 12-character commit SHA, imports them into native K3s containerd, creates random PostgreSQL/MinIO credentials only when the Kubernetes Secret is absent, applies the `home` overlay, waits for all workloads, and checks the loopback-only ingress. It never writes credential values to the repository.
+The command:
 
-The `ai-artist-local-path` StorageClass pins both application PVCs to `/data/ai-artist/k3s-storage`. Each dynamically provisioned directory includes the PV name, so deleting and recreating a same-named PVC creates a new directory instead of implicitly reusing retained data. To recover a retained PV, explicitly rebind that PV to the replacement claim. Deployment fails if `/data` resolves to the root filesystem, if K3s has not loaded that path, if an existing PVC uses another StorageClass, or if a bound PV reports a path outside the SSD root. Existing test PVCs created by an older manifest are not deleted automatically; inspect and back up their data before explicitly recreating them.
+- derives immutable Website and Backend image tags from the 12-character commit SHA;
+- builds the images and imports them into native K3s containerd;
+- creates random PostgreSQL/MinIO credentials only when the Kubernetes Secret is absent;
+- applies the `home` overlay and waits for every workload;
+- verifies PVC placement, running image tags, and the loopback ingress;
+- never writes credential values to the repository.
 
-After the loopback smoke check passes, explicitly enable persistent tailnet-only HTTPS and inspect its status:
+The `ai-artist-local-path` StorageClass pins both application PVCs to `/data/ai-artist/k3s-storage`. Each provisioned directory includes the PV name. With reclaim policy `Retain`, recreating a same-named PVC creates a new directory; recovery requires explicitly rebinding the retained PV. The deployment refuses to delete or silently reuse legacy PVC data.
+
+After the loopback smoke check passes, explicitly enable persistent tailnet-only HTTPS:
 
 ```bash
 ./scripts/linux-k3s.sh configure-serve
 ```
 
-This runs Tailscale Serve in background mode against `http://127.0.0.1:30080`; it does not enable Funnel. Use `status`, `logs`, and `smoke` subcommands for server diagnostics.
+This proxies Tailscale Serve to `http://127.0.0.1:30080` in background mode without enabling Funnel. Use `status`, `logs`, and `smoke` for diagnostics.
 
-Recommended server env values once the OpenAI provider adapter is enabled:
+## Implemented Server Configuration
+
+The committed K3s ConfigMap supplies non-secret settings equivalent to:
 
 ```bash
-# M1 household generation; the current server verification path uses fake
-AI_ARTIST_GENERATION_PROVIDER=openai
-AI_ARTIST_OPENAI_IMAGE_MODEL=gpt-image-2-2026-04-21
-AI_ARTIST_OPENAI_IMAGE_QUALITY=medium
-AI_ARTIST_OPENAI_PROVIDER_SIZE=1808x1200
-AI_ARTIST_PROVIDER_TIMEOUT_SECONDS=480
-
-# Supplied only to the Generation Worker
-OPENAI_API_KEY=
-
-# Home Kubernetes runtime
 AI_ARTIST_STAGE=home
-AI_ARTIST_PUBLIC_BASE_URL=https://tongjin-server.tail910d5f.ts.net
-AI_ARTIST_API_BASE_URL=https://tongjin-server.tail910d5f.ts.net
+AI_ARTIST_OBJECT_ENDPOINT=http://minio:9000
 AI_ARTIST_OBJECT_PRESIGN_ENDPOINT=https://tongjin-server.tail910d5f.ts.net
 AI_ARTIST_OBJECT_ADDRESSING_STYLE=path
 AI_ARTIST_PRIVATE_BUCKET=ai-artist-private
-AI_ARTIST_DATABASE_URL=
-
-# Optional operator-local output paths
-AI_ARTIST_OUTPUT_DIR=./outputs
-AI_ARTIST_ASSET_CACHE_DIR=./.cache/assets
-
-# Product defaults
-AI_ARTIST_DEFAULT_STYLE=warm_handmade
-AI_ARTIST_DEFAULT_CHANNEL=home-download
-AI_ARTIST_DEFAULT_CURRENCY=USD
-
-# Optional marketplace integrations, draft-only until approved
-ETSY_CLIENT_ID=
-ETSY_CLIENT_SECRET=
-SHOPIFY_STORE_DOMAIN=
-SHOPIFY_ADMIN_ACCESS_TOKEN=
-PRINTFUL_API_KEY=
-PRINTIFY_API_KEY=
-
-# Optional NFT integrations, not M1 core
-NFT_WALLET_ADDRESS=
-NFT_NETWORK=
-OPENSEA_API_KEY=
+AI_ARTIST_UPLOAD_URL_TTL_SECONDS=900
+AI_ARTIST_DOWNLOAD_URL_TTL_SECONDS=900
+AI_ARTIST_ATTEMPT_LEASE_SECONDS=600
+AI_ARTIST_ATTEMPT_RECONCILE_INTERVAL_SECONDS=60
+AI_ARTIST_GENERATION_PROVIDER=fake
+AI_ARTIST_WORKER_POLL_SECONDS=1
+AI_ARTIST_LOG_LEVEL=INFO
 ```
 
-Do not commit real `.env` files, API keys, database credentials, or Kubernetes Secret manifests containing values. Create the OpenAI key directly in the cluster or through an equivalent local secret workflow. Only the Generation Worker receives `OPENAI_API_KEY`; the browser and Backend API never receive it. The OpenAI organization must be verified if GPT Image access requires verification for the configured account.
+The cluster Secret supplies `AI_ARTIST_DATABASE_URL`, `AI_ARTIST_OBJECT_ACCESS_KEY`, and `AI_ARTIST_OBJECT_SECRET_KEY` to the workloads that need them. Never commit real `.env` files, database credentials, object-store credentials, presigned URLs, or Secret manifests containing values.
 
-## M1 Application Foundation
+The Website receives a browser-safe runtime file mounted from `ai-artist-ui-runtime`:
+
+```js
+window.__AI_ARTIST_CONFIG__ = Object.freeze({
+  stage: "home",
+  apiBaseUrl: "",
+  assetBaseUrl: "",
+  maxPhotos: 5,
+  demoMode: false,
+});
+```
+
+Empty base URLs use the canonical current origin. Do not place credentials or internal service addresses in browser config.
+
+## Application Foundation
 
 - Website: Next.js App Router, React, and TypeScript.
 - Backend API: Python with FastAPI and Pydantic.
 - Generation Worker: Python, sharing the backend domain package while running as a separate process.
 - Persistence: PostgreSQL with SQLAlchemy 2 and Alembic.
 - Object storage: S3-compatible adapter with MinIO in Phase 1.
-- Provider SDK: official OpenAI Python SDK.
-- Image normalization: Pillow.
+- Implemented generation provider: deterministic `fake-v1`.
+- Image normalization: Pillow, from `1808x1200` provider-format PNG to `1800x1200` artifact PNG.
 
-The OpenAI adapter sends all 1 to 5 photos through `/v1/images/edits`, requests one `1808x1200` PNG, and center-crops 4 pixels from each horizontal edge to produce the fixed `1800x1200` artifact. Construct the official Python client with `OpenAI(max_retries=0, timeout=480.0)` and do not add transport retries. M1 does not automatically retry or requeue a claimed Attempt. Both initial generation and refinement use `POST /v1/tasks/{task_id}/attempts`.
+Both initial generation and refinement use `POST /v1/tasks/{task_id}/attempts`. M1 never automatically retries or requeues a claimed Attempt.
 
 ## M1 Product Settings
 
-Recommended defaults:
+- Input: 1 to 5 user-owned JPEG or PNG photos.
+- Metadata: title, creative note, and fixed style `warm_handmade`.
+- Output: one `1800x1200` `postcard.png` for each successful Attempt.
+- Access: private household tailnet only.
+- Publishing: local download only; no automatic external actions.
 
-- `product_niche`: `travel_memory_cards`
-- `source_count`: `1-5 photos`
-- `style`: `warm_handmade`
-- `channel`: `home_download`
-- `publish_mode`: `local_only`
-- `auto_publish`: `false`
-- `nft_enabled`: `false`
+## Planned Provider Contract
 
-M1 output:
+LLD-03 defines a future OpenAI adapter that will use the official Python SDK, one provider call per Attempt, `max_retries=0`, an 8-minute timeout, and server-side credentials available only to the Generation Worker. Those are target contracts, not current setup steps.
 
-- one `1800x1200` `postcard.png` for each successful Attempt
+Before enabling that adapter:
 
-## Output File Settings
+1. Add the provider dependency and implementation behind `GenerationProvider`.
+2. Add unit tests for request construction, zero retries, response normalization, failures, and late-response fencing.
+3. Add `OPENAI_API_KEY` only to the Generation Worker Secret boundary.
+4. Use owned or explicitly approved fixture photos for the first real-provider readiness check.
+5. Confirm the UI clearly explains that selected photos and creative guidance leave the home network.
 
-Only the fixed `1800x1200` postcard PNG applies to M1. The additional export formats below are future product-pack settings and are not part of the Phase 1 implementation path.
+## Deferred Product Exploration
 
-Recommended early export formats:
+Product packs, rights workflow, automated QA, pricing, Etsy/Shopify, POD, listing copy, payment, NFT, and public hosting are not current configuration surfaces. The [historical product-pack PRFAQ](./docs/ai-artist/prfaq/milestone-1-scope.md) preserves that exploration.
 
-- sticker sheet: `PNG`, `PDF`
-- individual stickers: `PNG` with transparent background when quality is acceptable
-- postcard: `PNG`, `PDF`
-- poster: `PNG`, `PDF`
-- listing previews: `JPG` or `PNG`
-- listing kit: `Markdown`, `JSON`
+Before any future sale or marketplace-facing implementation:
 
-Recommended file naming pattern:
-
-```text
-{project_slug}_{product_type}_{ratio_or_size}_{version}.{ext}
-```
-
-Example:
-
-```text
-kyoto_memory_sticker_sheet_a4_v1.pdf
-kyoto_memory_postcard_4x6_v1.png
-kyoto_memory_listing_kit_v1.md
-```
-
-## Etsy Digital Listing Constraints
-
-Before Etsy-facing implementation, verify the current official Etsy docs.
-
-As of this setup draft:
-
-- digital listings can be instant downloads or made-to-order downloads
-- instant digital listings support up to 5 files
-- each uploaded file can be up to 20MB
-- digital item file names are visible to buyers
-- digital listings do not support variations
-- digital items must be made and/or designed by the seller
-- seller-prompted AI creations require disclosure in the listing description
-
-Source docs:
-
-- https://help.etsy.com/hc/en-us/articles/115015628347-How-to-Manage-Your-Digital-Listings
-- https://www.etsy.com/legal/creativity/
-- https://www.etsy.com/legal/ip/
-
-## POD Settings
-
-POD is not M1 core. If enabled later, require these decisions first:
-
-- provider: `Printful`, `Printify`, or other
-- product types: stickers, posters, postcards, cards, apparel, or home goods
-- production partner disclosure
-- shipping region and currency
-- cost, margin, and refund rules
-- safe area, bleed, and color requirements
-- mockup source and accuracy expectations
-
-Never create live POD products without explicit user approval.
-
-## NFT Settings
-
-NFT is optional and should not be part of M1 by default.
-
-Only revisit NFT after answering:
-
-- What is collectible about the style or artist brand?
-- What is scarce or limited?
-- What utility does ownership provide?
-- Which chain and wallet are used?
-- Who pays gas and platform fees?
-- What metadata and license terms are attached?
-- What user approval is required before minting?
-
-Never mint NFTs or connect a wallet automatically.
-
-## Compliance Checklist
-
-Each commercial output should record:
-
-- Did the user create or license the source photo?
-- Does the source contain recognizable people?
-- Does it include children?
-- Does it include logos, trademarks, signage, branded products, or copyrighted artwork?
-- Does it resemble a celebrity, fictional character, franchise, or living artist style too closely?
-- Is AI usage disclosed where required?
-- Is the output marked `personal`, `commercial`, `draft`, or `blocked`?
-
-## Quality Checklist
-
-Each output pack should record:
-
-- dimensions
-- aspect ratio
-- file size
-- export format
-- readable text check
-- transparent background check where applicable
-- print-readiness status
-- visible artifacts
-- watermark/signature status
-- marketplace limit status
-
-## Launch Checklist
-
-Before any real sale:
-
-- verify current marketplace policies
-- verify all source rights
-- inspect final exported files manually
-- test download package names and file sizes
-- write clear buyer instructions
-- add AI disclosure where required
-- confirm refund/support expectations
-- keep a record of product source, prompts, edits, and publication date
+- verify current platform policies from official sources;
+- confirm source-photo rights and inspect outputs manually;
+- review dimensions, file size, text readability, visible artifacts, watermark/signature status, and print suitability;
+- require explicit approval before publishing, buyer communication, fulfillment, POD product creation, or NFT minting.

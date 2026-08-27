@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,19 +27,14 @@ class Settings(BaseSettings):
     download_url_ttl_seconds: int = Field(default=900, ge=60, le=3600)
     attempt_lease_seconds: int = Field(default=600, ge=60, le=3600)
     attempt_reconcile_interval_seconds: int = Field(default=60, ge=5, le=600)
-    generation_provider: str = "fake"
-    openai_image_model: str = "gpt-image-2-2026-04-21"
+    generation_provider: Literal["fake"] = "fake"
     provider_timeout_seconds: int = Field(default=480, ge=30, le=540)
     log_level: str = "INFO"
     worker_poll_seconds: float = Field(default=1.0, ge=0.1, le=60)
 
     @property
-    def provider_model(self) -> str:
-        if self.generation_provider == "fake":
-            return "fake-v1"
-        if self.generation_provider == "openai":
-            return self.openai_image_model
-        raise ValueError("AI_ARTIST_GENERATION_PROVIDER must be 'fake' or 'openai'")
+    def provider_model(self) -> Literal["fake-v1"]:
+        return "fake-v1"
 
 
 @lru_cache

@@ -5,7 +5,7 @@
 | Field | Value |
 | --- | --- |
 | LLD | LLD-02 |
-| Product milestone | M1: `Memory Product Pack Agent` |
+| Product milestone | M1: `Memory Postcard Studio` |
 | Primary source | [M1 HLD](../hld/milestone-1-high-level-design.md) |
 | Status | Implementation-ready; PostgreSQL schema and customer API finalized |
 | Scope owner | Backend API, lifecycle, Tailscale access contract, upload/download contracts, attempt input snapshots, and attempt metadata |
@@ -280,7 +280,7 @@ CREATE INDEX attempts_provider_request_idx
   WHERE provider_request_id IS NOT NULL;
 ```
 
-`provider_id` and `provider_model` are fixed when the Attempt is inserted. Normal household generation stores `openai` and `gpt-image-2-2026-04-21`; deterministic tests store `fake` and `fake-v1`. A later configuration change cannot alter an already-created Attempt.
+`provider_id` and `provider_model` are fixed when the Attempt is inserted. The current runtime stores `fake` and `fake-v1`. After the target adapter is implemented and enabled, new Attempts may instead store `openai` and `gpt-image-2-2026-04-21`. A later configuration change cannot alter an already-created Attempt.
 
 ### `artifacts`
 
@@ -620,8 +620,8 @@ Every attempt stores a complete input snapshot:
     "prompt_recipe_version": "m1.postcard_prompt.v1",
     "refinement_note": "Use softer colors and make the garden more prominent"
   },
-  "provider_id": "openai",
-  "provider_model": "gpt-image-2-2026-04-21",
+  "provider_id": "fake",
+  "provider_model": "fake-v1",
   "provider_request_id": null,
   "lease_token": "018f0f64-7a3b-7e21-9db8-35d3f2fe91bc",
   "lease_expires_at": "2026-08-24T15:15:00Z",
@@ -705,8 +705,8 @@ The queued Attempt row is the complete durable work item. M1 does not create a s
   "attempt_id": "att_01J...",
   "task_id": "task_01J...",
   "status": "queued",
-  "provider_id": "openai",
-  "provider_model": "gpt-image-2-2026-04-21",
+  "provider_id": "fake",
+  "provider_model": "fake-v1",
   "input_snapshot": {}
 }
 ```

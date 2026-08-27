@@ -5,7 +5,7 @@
 | Field | Value |
 | --- | --- |
 | LLD | LLD-04 |
-| Product milestone | M1: Memory Product Pack Agent |
+| Product milestone | M1: Memory Postcard Studio |
 | Status | Deferred; not part of M1 execution |
 | Scope owner | Future automated QA, packaging, and multi-artifact delivery |
 

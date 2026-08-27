@@ -1,8 +1,12 @@
-# AI Artist Milestone 1 PRFAQ: Memory Product Pack Agent
+# AI Artist Historical PRFAQ: Memory Product Pack Agent
 
-Status: Draft for review  
-Owner: Codex  
-Target: Fast launchable M1
+Status: Historical product exploration; superseded for the active M1 implementation
+Owner: Codex
+Target: Possible post-M1 product-pack direction
+
+> **Historical document:** This PRFAQ preserves the original product-pack and marketplace-validation thesis. It is not the current implementation contract, launch promise, pricing plan, or runtime status. The active M1 is the private `Memory Postcard Studio`: 1 to 5 photos, title/note/style, immutable Attempts, and one `1800x1200` PNG per successful Attempt. Product packs, pricing, rights workflow, listing materials, QA packaging, and marketplace features are deferred.
+>
+> Use the [M1 HLD](../hld/milestone-1-high-level-design.md) and [reconciled LLD set](../lld/README.md) as implementation authority.
 
 ## Press Release
 

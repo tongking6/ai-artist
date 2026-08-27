@@ -3,4 +3,5 @@ window.__AI_ARTIST_CONFIG__ = Object.freeze({
   apiBaseUrl: "",
   assetBaseUrl: "",
   maxPhotos: 5,
+  demoMode: true,
 });
