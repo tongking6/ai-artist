@@ -30,6 +30,10 @@ from ai_artist.models import Artifact, Asset, Attempt, Task
 logger = logging.getLogger("ai_artist.worker")
 
 
+class FinalizationFenceError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class ClaimedAttempt:
     attempt_id: str
@@ -166,13 +170,18 @@ def process_claimed_attempt(
         ):
             raise RuntimeError("Stored postcard failed verification")
         finalization_started = True
-        finalize_ready(
-            claimed,
-            provider_request_id=generated.provider_request_id,
-            output_key=output_key,
-            output_bytes=normalized,
-            checksum=checksum,
-        )
+        try:
+            finalize_ready(
+                claimed,
+                provider_request_id=generated.provider_request_id,
+                output_key=output_key,
+                output_bytes=normalized,
+                checksum=checksum,
+            )
+        except FinalizationFenceError:
+            object_store.delete(output_key)
+            stored_output = False
+            raise
     except Exception:
         logger.exception(
             "Attempt generation failed",
@@ -225,7 +234,7 @@ def finalize_ready(
             .with_for_update()
         )
         if attempt is None:
-            raise RuntimeError("Attempt lease is no longer eligible for finalization")
+            raise FinalizationFenceError("Attempt lease is no longer eligible for finalization")
         artifact = Artifact(
             artifact_id=new_id("artifact"),
             task_id=claimed.task_id,
