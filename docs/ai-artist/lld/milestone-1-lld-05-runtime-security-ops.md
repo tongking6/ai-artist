@@ -16,6 +16,8 @@ LLD-05 defines the minimum Phase 1 runtime and security posture for the M1 `Task
 
 Phase 1 runs on a home Linux server with a single-node K3s cluster. The complete customer workflow is available only to authorized devices in the owner's Tailscale tailnet. LAN devices use the same Tailscale URL rather than a separate LAN ingress. The Generation Worker calls the OpenAI Image API over outbound HTTPS using a server-side API key; the home server does not run an AI model.
 
+Initial integration verification runs directly on this Linux K3s runtime with the deterministic fake provider. Provider-cost and credential-dependent checks begin only after the real Website, API, PostgreSQL, MinIO, Worker, artifact, and download flow passes through the tailnet origin.
+
 AWS remains a possible later deployment target. M1 domain contracts must therefore stay independent of Kubernetes, PostgreSQL, MinIO, and AWS-specific SDK types.
 
 ## In Scope
@@ -74,6 +76,10 @@ Phase 1 components are:
 
 All workloads run in one `ai-artist` namespace. Phase 1 assumes planned downtime during node, cluster, database, object-store, or application maintenance.
 
+## Initial Linux Server Verification
+
+The first native K3s deployment uses `AI_ARTIST_GENERATION_PROVIDER=fake`, `demoMode=false`, generated in-cluster PostgreSQL/MinIO credentials, and the full home storage and access topology. It must pass the real Browser -> API -> PostgreSQL/MinIO -> Worker -> Artifact -> download flow before the OpenAI provider is enabled. There is no parallel local-cluster profile or disposable local storage contract.
+
 ## Tailscale Access Boundary
 
 The default Task route is:
@@ -126,7 +132,7 @@ Attempt delivery rules:
 - The provider call timeout is 8 minutes, shorter than the 10-minute Attempt lease.
 - M1 makes at most one provider call per Attempt and never changes a failed or expired Attempt back to `queued`.
 - Provider, storage, normalization, or verification failure moves the claimed Attempt to `failed` with a customer-safe `failure_code`.
-- A Worker startup sweep and 60-second periodic sweep mark expired `generating` Attempts `failed`; they clear lease fields and never requeue the Attempt.
+- A dedicated Worker reconciliation thread runs a startup sweep and then a 60-second periodic sweep, independently of synchronous provider calls. It marks expired `generating` Attempts `failed`, clears lease fields, and never requeues the Attempt.
 - Ready finalization requires status `generating`, the matching `lease_token`, and an unexpired lease. It inserts the Artifact and changes the Attempt to `ready` in one PostgreSQL transaction.
 - If the provider returns after lease expiry or terminal failure, the conditional update fails and the Worker discards the response.
 - There is no delivery-count, retry-count, next-retry, job ID, or command JSON field in M1.
@@ -251,7 +257,7 @@ Generation Worker configuration:
 | AI_ARTIST_OPENAI_PROVIDER_SIZE | Fixed at `1808x1200`; LLD-03 center-crops to `1800x1200`. |
 | AI_ARTIST_PROVIDER_TIMEOUT_SECONDS | Fixed at 480 seconds for M1. |
 | OPENAI_API_KEY | OpenAI credential, supplied only to the Generation Worker when `openai` is selected. |
-| LOG_LEVEL | Basic log verbosity. |
+| AI_ARTIST_LOG_LEVEL | Basic log verbosity. |
 
 ## Minimum Observability
 
@@ -284,6 +290,8 @@ The finalized server and storage profile is:
 | Tailnet identity | `tongjin-server.tail910d5f.ts.net`, currently `100.90.10.70` |
 
 Phase 1 application images are built on the x86_64 server from a named Git commit with the existing Docker installation, exported as image archives, and imported into K3s containerd. Deployments use immutable commit-derived tags with `imagePullPolicy: IfNotPresent`. A private registry and automated release pipeline are deferred.
+
+The `ai-artist-local-path` StorageClass uses `rancher.io/local-path` with `nodePath: /data/ai-artist/k3s-storage` and `pathPattern: "{{ .PVC.Namespace }}/{{ .PVC.Name }}/{{ .PVName }}/"`; both StatefulSets explicitly set `storageClassName`. Because the reclaim policy is `Retain`, recovery must explicitly rebind the retained PV; recreating a same-named PVC provisions a new PV directory. The deployment preflight requires K3s `default-local-storage-path` to match, verifies `/data` is not the root filesystem, and checks every bound PV's reported `hostPath` or `local` path before declaring deployment successful. It refuses to mutate or delete legacy PVCs automatically.
 
 Before using irreplaceable household photos:
 
@@ -322,6 +330,8 @@ Kubernetes resource names, PostgreSQL row IDs, MinIO-specific APIs, AWS ARNs, SQ
 - Lease expiry marks the Attempt failed without requeue, and conditional finalization rejects late Worker responses.
 - Failed Attempts remain inspectable with no automatic cleanup.
 - Private object storage uses persistent storage and does not allow anonymous reads or listing.
+- PostgreSQL and MinIO PVCs use `ai-artist-local-path`, and their bound PV paths resolve below `/data/ai-artist/k3s-storage` on the dedicated SSD.
+- Website, API, migration, and Worker Deployments reference the exact commit-derived image tag imported during the deployment.
 - Upload/download URLs are short-lived, use the canonical Tailscale hostname, and pass a real presigned POST/GET end-to-end check through Tailscale Serve and Traefik.
 - `OPENAI_API_KEY` exists only in a server-side Secret available to the Generation Worker and never reaches the browser or repository.
 - AI generation uses outbound provider APIs; no foundation model runs on the home server.

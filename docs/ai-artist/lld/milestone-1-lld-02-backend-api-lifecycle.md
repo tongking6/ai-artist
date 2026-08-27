@@ -184,7 +184,7 @@ CREATE INDEX assets_pending_expiry_idx
   WHERE upload_status = 'pending';
 ```
 
-`upload_url_expires_at` applies only to the short-lived upload authorization. An uploaded Asset and its stored photo do not expire when that timestamp passes. Raw presigned URLs and POST credentials are never stored.
+`upload_url_expires_at` applies only to the short-lived upload authorization. The presigned POST writes only to a mutable reservation key. Successful Asset completion copies the validated object to a server-owned immutable Asset key and changes `storage_key` to that finalized key before marking the row `uploaded`; outstanding POST credentials cannot address the finalized key. An uploaded Asset and its stored photo do not expire when that timestamp passes. Raw presigned URLs and POST credentials are never stored.
 
 ### `attempts`
 
@@ -323,7 +323,7 @@ Artifact rows are inserted only after minimum verification. Row existence means 
 
 ### Cross-Table Transactions And Locks
 
-- Upload reservation: lock the Task row, expire stale pending Assets, enforce `uploaded + unexpired pending + requested <= 5`, then insert the batch.
+- Upload reservation: lock the Task row, expire stale pending Assets, enforce `uploaded + unexpired pending + requested <= 5`, then insert the batch. Idempotent retries regenerate instructions only for unexpired `pending` Assets and never for `uploaded` Assets.
 - Complete intake: lock the Task row, require complete metadata, 1 to 5 uploaded Assets, and no pending Assets, then set Task `ready`.
 - Create Attempt: lock the Task row, insert the queued Attempt with fixed provider/model and immutable `input_snapshot`, and update `tasks.current_attempt_id` in one transaction.
 - Snapshot photo order: write uploaded Asset IDs ordered by `(created_at, asset_id)`; M1 has no manual photo reordering.
@@ -580,7 +580,7 @@ Pending Asset schema:
 }
 ```
 
-The server persists the batch idempotency key as `upload_batch_key` on each reservation. `client_file_id` is browser-generated, stable for the selected file within this batch, and unique within the request. `filename` is display metadata only; the backend strips path components and chooses the storage extension from the validated media type. After successful object-store validation, the same record is updated with `upload_status = uploaded` and `updated_at`; the stored size must match `size_bytes`. Asset upload status transitions are:
+The server persists the batch idempotency key as `upload_batch_key` on each reservation. `client_file_id` is browser-generated, stable for the selected file within this batch, and unique within the request. `filename` is display metadata only; the backend strips path components and chooses the storage extension from the validated media type. After successful object-store validation, the backend copies the reservation object to `tasks/{task_id}/assets/{asset_id}/source.{jpg|png}`, verifies the copied object, changes `storage_key` to that immutable key, and updates the same record with `upload_status = uploaded` and `updated_at`; the stored size and media type must match the reservation. Asset upload status transitions are:
 
 ```text
 pending -> uploaded
@@ -862,7 +862,7 @@ Upload-slot rules:
 - The endpoint is allowed while the Task is `draft` or `uploading`, before any Attempt exists.
 - Repeated requests may be made while intake is incomplete.
 - `idempotency_key` is required, opaque, unique per Task and per Add-photo batch, and reused when the same request is retried.
-- A retry with the same Task, `idempotency_key`, and canonical file set returns the same Asset/client-file mappings and creates no new reservations. The backend may regenerate presigned POST fields for the same `storage_key`, but the returned expiration cannot exceed the persisted `upload_url_expires_at`.
+- A retry with the same Task, `idempotency_key`, and canonical file set returns no new reservations. The backend may regenerate presigned POST fields only for the batch's unexpired `pending` Assets, and the returned expiration cannot exceed the persisted `upload_url_expires_at`. It never returns upload authorization for an `uploaded` Asset; an all-uploaded retry returns an empty slots array.
 - The canonical manifest is sorted by `client_file_id`; changing array order alone is not a mismatch. Reusing the same key with a different file set or changed per-file field returns `upload_batch_mismatch`.
 - A batch key whose reservations have all expired returns `upload_batch_expired`; the client must use a new key for a new batch.
 - Each request reserves slots only for newly selected files; a retry for the same file may reuse its existing pending slot.
@@ -873,7 +873,7 @@ Upload-slot rules:
 
 Asset-complete behavior:
 
-- If the Asset is already `uploaded`, the endpoint returns the existing Asset metadata without revalidating or creating a duplicate record.
+- If the Asset is already `uploaded`, the endpoint returns the existing Asset metadata without revalidating, copying, or creating a duplicate record.
 - If the object is missing or validation fails, the endpoint returns an explicit error and does not mark the Asset `uploaded`.
 - If the reservation has expired, the endpoint returns `upload_slot_expired` and does not validate or mark the Asset `uploaded`.
 - An uploaded Asset is permanently bound to its Task and cannot be completed or attached through another Task.
