@@ -125,6 +125,8 @@ spec:
             - ai-artist.io/local-path
             - --namespace
             - ai-artist
+            - --service-account-name
+            - ai-artist-local-path-provisioner
             - --config
             - /etc/config/config.json
           volumeMounts:

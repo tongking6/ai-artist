@@ -22,6 +22,7 @@ jobs:
           grep -F 'provisioner: ai-artist.io/local-path' "$RUNNER_TEMP/ai-artist-rendered.yaml"
           grep -F 'nodePath: /data/ai-artist/k3s-storage' "$RUNNER_TEMP/ai-artist-rendered.yaml"
           grep -F 'storageClassName: ai-artist-owned-local-path' "$RUNNER_TEMP/ai-artist-rendered.yaml"
+          grep -F -- '--service-account-name' "$RUNNER_TEMP/ai-artist-rendered.yaml"
           grep -A 1 'configMap:' "$RUNNER_TEMP/ai-artist-rendered.yaml" | grep -F 'name: local-path-config'
           ! grep -F 'provisioner: rancher.io/local-path' "$RUNNER_TEMP/ai-artist-rendered.yaml"
 
