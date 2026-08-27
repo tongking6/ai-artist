@@ -165,14 +165,22 @@ def create_upload_slots(
                     "upload_batch_mismatch",
                     "Upload batch does not match its original manifest.",
                 )
-            active_existing = [asset for asset in existing if asset.upload_status != "expired"]
-            if not active_existing:
+            pending_existing = [
+                asset
+                for asset in existing
+                if asset.upload_status == "pending" and asset.upload_url_expires_at > now
+            ]
+            if not pending_existing and all(
+                asset.upload_status == "uploaded" for asset in existing
+            ):
+                return UploadSlotsView(slots=[])
+            if not pending_existing:
                 raise DomainError(
                     409,
                     "upload_batch_expired",
                     "Upload batch expired.",
                 )
-            assets = active_existing
+            assets = pending_existing
         else:
             active_count = session.scalar(
                 select(func.count())
@@ -230,6 +238,8 @@ def complete_asset(
     asset_id: str,
 ) -> PhotoView:
     now = utcnow()
+    expired = False
+    completed_photo: PhotoView | None = None
     with session.begin():
         task = _locked_task(session, task_id)
         asset = session.scalar(
@@ -244,25 +254,49 @@ def complete_asset(
         if asset.upload_status == "expired" or asset.upload_url_expires_at <= now:
             asset.upload_status = "expired"
             asset.updated_at = now
+            task.updated_at = now
             _recalculate_task_input_status(session, task, now)
-            raise DomainError(409, "upload_slot_expired", "Upload slot expired.")
-
-        stored = object_store.inspect(asset.storage_key)
-        if (
-            stored is None
-            or stored.size_bytes != asset.size_bytes
-            or stored.media_type != asset.media_type
-        ):
-            raise DomainError(
-                422,
-                "uploaded_asset_invalid",
-                "Uploaded asset failed validation.",
+            expired = True
+        else:
+            upload_key = asset.storage_key
+            stored = object_store.inspect(upload_key)
+            if (
+                stored is None
+                or stored.size_bytes != asset.size_bytes
+                or stored.media_type != asset.media_type
+            ):
+                raise DomainError(
+                    422,
+                    "uploaded_asset_invalid",
+                    "Uploaded asset failed validation.",
+                )
+            extension = "jpg" if asset.media_type == "image/jpeg" else "png"
+            immutable_key = (
+                f"tasks/{task_id}/assets/{asset.asset_id}/source.{extension}"
             )
-        asset.upload_status = "uploaded"
-        asset.updated_at = now
-        task.status = "uploading"
-        task.updated_at = now
-    return _photo_view(asset)
+            object_store.copy(upload_key, immutable_key)
+            finalized = object_store.inspect(immutable_key)
+            if (
+                finalized is None
+                or finalized.size_bytes != asset.size_bytes
+                or finalized.media_type != asset.media_type
+            ):
+                raise DomainError(
+                    422,
+                    "uploaded_asset_invalid",
+                    "Finalized asset failed validation.",
+                )
+            asset.storage_key = immutable_key
+            asset.upload_status = "uploaded"
+            asset.updated_at = now
+            task.status = "uploading"
+            task.updated_at = now
+            completed_photo = _photo_view(asset)
+    if expired:
+        raise DomainError(409, "upload_slot_expired", "Upload slot expired.")
+    if completed_photo is None:
+        raise RuntimeError("Asset completion produced no result")
+    return completed_photo
 
 
 def complete_intake(session: Session, task_id: str) -> TaskView:
@@ -448,6 +482,7 @@ def _expire_stale_assets(
     for asset in stale_assets:
         asset.upload_status = "expired"
         asset.updated_at = now
+    task.updated_at = now
     _recalculate_task_input_status(session, task, now)
 
 

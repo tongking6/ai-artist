@@ -37,6 +37,8 @@ class ObjectStore(Protocol):
 
     def inspect(self, key: str) -> StoredObject | None: ...
 
+    def copy(self, source_key: str, destination_key: str) -> None: ...
+
     def get(self, key: str) -> bytes: ...
 
     def put(self, key: str, body: bytes, media_type: str) -> None: ...
@@ -113,6 +115,14 @@ class S3ObjectStore:
     def get(self, key: str) -> bytes:
         response = self._internal.get_object(Bucket=self._bucket, Key=key)
         return bytes(response["Body"].read())
+
+    def copy(self, source_key: str, destination_key: str) -> None:
+        self._internal.copy_object(
+            Bucket=self._bucket,
+            Key=destination_key,
+            CopySource={"Bucket": self._bucket, "Key": source_key},
+            MetadataDirective="COPY",
+        )
 
     def put(self, key: str, body: bytes, media_type: str) -> None:
         self._internal.put_object(

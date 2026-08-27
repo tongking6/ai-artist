@@ -28,7 +28,7 @@ spec:
     spec:
       containers:
         - name: website
-          image: ai-artist-ui:m1
+          image: ai-artist-ui:replace-me
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -91,7 +91,7 @@ spec:
     spec:
       initContainers:
         - name: migrate
-          image: ai-artist-backend:m1
+          image: ai-artist-backend:replace-me
           imagePullPolicy: IfNotPresent
           command: ["alembic", "upgrade", "head"]
           envFrom:
@@ -122,7 +122,7 @@ spec:
                   key: MINIO_ROOT_PASSWORD
       containers:
         - name: api
-          image: ai-artist-backend:m1
+          image: ai-artist-backend:replace-me
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -189,7 +189,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: ai-artist-backend:m1
+          image: ai-artist-backend:replace-me
           imagePullPolicy: IfNotPresent
           command: ["ai-artist-worker"]
           envFrom:

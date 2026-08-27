@@ -33,7 +33,7 @@ AWS may be added later if public access, managed durability, scaling, or HA beco
 
 Integration testing and Phase 1 deployment run directly on the approved home Linux server. macOS remains suitable for UI and unit tests, but it is not a Kubernetes integration environment.
 
-The server must have Docker, native K3s, `openssl`, `curl`, and `sudo`. K3s must be configured before deployment so ServiceLB is disabled and NodePort traffic binds only to loopback:
+The server must have Docker, native K3s, `openssl`, `curl`, `findmnt`, and `sudo`. The 1 TB SSD must be mounted at `/data`. K3s must be configured before deployment so ServiceLB is disabled, NodePort traffic binds only to loopback, and local-path provisioning uses the SSD:
 
 ```yaml
 # /etc/rancher/k3s/config.yaml
@@ -41,6 +41,7 @@ disable:
   - servicelb
 kube-proxy-arg:
   - nodeport-addresses=127.0.0.0/8
+default-local-storage-path: /data/ai-artist/k3s-storage
 ```
 
 Restart K3s after changing that host-owned file, then deploy from a checkout on the Linux server:
@@ -49,7 +50,9 @@ Restart K3s after changing that host-owned file, then deploy from a checkout on 
 ./scripts/linux-k3s.sh deploy
 ```
 
-The command builds the Website and Backend images on Linux, imports them into native K3s containerd, creates random PostgreSQL/MinIO credentials only when the Kubernetes Secret is absent, applies the `home` overlay, waits for all workloads, and checks the loopback-only ingress. It never writes credential values to the repository.
+The command requires a clean named Git commit, tags Website and Backend images with the 12-character commit SHA, imports them into native K3s containerd, creates random PostgreSQL/MinIO credentials only when the Kubernetes Secret is absent, applies the `home` overlay, waits for all workloads, and checks the loopback-only ingress. It never writes credential values to the repository.
+
+The `ai-artist-local-path` StorageClass pins both application PVCs to `/data/ai-artist/k3s-storage`. Deployment fails if `/data` resolves to the root filesystem, if K3s has not loaded that path, if an existing PVC uses another StorageClass, or if a bound PV reports a path outside the SSD root. Existing test PVCs created by an older manifest are not deleted automatically; inspect and back up their data before explicitly recreating them.
 
 After the loopback smoke check passes, explicitly enable persistent tailnet-only HTTPS and inspect its status:
 
