@@ -115,15 +115,21 @@ verify_storage_class() {
   fi
 }
 
-verify_pvc_storage() {
+verify_pvc_storage_class() {
   local pvc_name="$1"
-  local pvc_storage_class pv_name pv_path
+  local pvc_storage_class
   pvc_storage_class="$(kube get pvc "$pvc_name" -n "$namespace" -o jsonpath='{.spec.storageClassName}')"
   if [[ "$pvc_storage_class" != "$storage_class" ]]; then
     echo "PVC $pvc_name uses $pvc_storage_class instead of $storage_class." >&2
     echo "Back up any required data, then explicitly remove the legacy StatefulSets/PVCs before redeploying." >&2
     exit 1
   fi
+}
+
+verify_pvc_storage() {
+  local pvc_name="$1"
+  local pv_name pv_path
+  verify_pvc_storage_class "$pvc_name"
   pv_name="$(kube get pvc "$pvc_name" -n "$namespace" -o jsonpath='{.spec.volumeName}')"
   if [[ -z "$pv_name" ]]; then
     echo "PVC $pvc_name is not bound to a PersistentVolume." >&2
@@ -137,9 +143,19 @@ verify_pvc_storage() {
 }
 
 check_existing_storage() {
-  local pvc_name
+  local pvc_name pvc_phase pv_name
   for pvc_name in data-postgresql-0 data-minio-0; do
     if kube get pvc "$pvc_name" -n "$namespace" >/dev/null 2>&1; then
+      verify_pvc_storage_class "$pvc_name"
+      pv_name="$(kube get pvc "$pvc_name" -n "$namespace" -o jsonpath='{.spec.volumeName}')"
+      if [[ -z "$pv_name" ]]; then
+        pvc_phase="$(kube get pvc "$pvc_name" -n "$namespace" -o jsonpath='{.status.phase}')"
+        if [[ "$pvc_phase" == "Pending" ]]; then
+          continue
+        fi
+        echo "PVC $pvc_name is unbound with unexpected phase $pvc_phase." >&2
+        exit 1
+      fi
       verify_pvc_storage "$pvc_name"
     fi
   done

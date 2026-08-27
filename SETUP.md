@@ -90,7 +90,7 @@ The command:
 - verifies the repo-owned StorageClass, PVC/PV placement, running image tags, and the loopback ingress;
 - never writes credential values to the repository.
 
-The `ai-artist-owned-local-path` StorageClass pins both application PVCs to `/data/ai-artist/k3s-storage`, independently of K3s's host-wide default local-storage path and built-in provisioner. Its app-owned provisioner has an allowlist containing only that directory. Each provisioned directory includes the PV name. With reclaim policy `Retain`, recreating a same-named PVC creates a new directory; recovery requires explicitly rebinding the retained PV. The deployment refuses to delete or silently reuse legacy PVC data. If an existing StorageClass, PVC, or PV does not match the repo-owned path contract, deployment stops; back up the data and reconcile or explicitly rebind the retained PV before retrying.
+The `ai-artist-owned-local-path` StorageClass pins both application PVCs to `/data/ai-artist/k3s-storage`, independently of K3s's host-wide default local-storage path and built-in provisioner. Its app-owned provisioner has an allowlist containing only that directory. Each provisioned directory includes the PV name. With reclaim policy `Retain`, recreating a same-named PVC creates a new directory; recovery requires explicitly rebinding the retained PV. The deployment refuses to delete or silently reuse legacy PVC data. It permits a pre-existing, matching `Pending` PVC so a repaired provisioner can bind it, but stops for an incompatible StorageClass, unexpected unbound phase, or incorrect bound PV path.
 
 After the loopback smoke check passes, explicitly enable persistent tailnet-only HTTPS:
 
