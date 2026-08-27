@@ -291,7 +291,7 @@ The finalized server and storage profile is:
 
 Phase 1 application images are built on the x86_64 server from a named Git commit with the existing Docker installation, exported as image archives, and imported into K3s containerd. Deployments use immutable commit-derived tags with `imagePullPolicy: IfNotPresent`. A private registry and automated release pipeline are deferred.
 
-The `ai-artist-local-path` StorageClass uses `rancher.io/local-path` with `nodePath: /data/ai-artist/k3s-storage`, and both StatefulSets explicitly set `storageClassName`. The deployment preflight requires K3s `default-local-storage-path` to match, verifies `/data` is not the root filesystem, and checks every bound PV's reported `hostPath` or `local` path before declaring deployment successful. It refuses to mutate or delete legacy PVCs automatically.
+The `ai-artist-local-path` StorageClass uses `rancher.io/local-path` with `nodePath: /data/ai-artist/k3s-storage` and `pathPattern: "{{ .PVC.Namespace }}/{{ .PVC.Name }}/{{ .PVName }}/"`; both StatefulSets explicitly set `storageClassName`. Because the reclaim policy is `Retain`, recovery must explicitly rebind the retained PV; recreating a same-named PVC provisions a new PV directory. The deployment preflight requires K3s `default-local-storage-path` to match, verifies `/data` is not the root filesystem, and checks every bound PV's reported `hostPath` or `local` path before declaring deployment successful. It refuses to mutate or delete legacy PVCs automatically.
 
 Before using irreplaceable household photos:
 

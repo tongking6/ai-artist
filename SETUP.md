@@ -52,7 +52,7 @@ Restart K3s after changing that host-owned file, then deploy from a checkout on 
 
 The command requires a clean named Git commit, tags Website and Backend images with the 12-character commit SHA, imports them into native K3s containerd, creates random PostgreSQL/MinIO credentials only when the Kubernetes Secret is absent, applies the `home` overlay, waits for all workloads, and checks the loopback-only ingress. It never writes credential values to the repository.
 
-The `ai-artist-local-path` StorageClass pins both application PVCs to `/data/ai-artist/k3s-storage`. Deployment fails if `/data` resolves to the root filesystem, if K3s has not loaded that path, if an existing PVC uses another StorageClass, or if a bound PV reports a path outside the SSD root. Existing test PVCs created by an older manifest are not deleted automatically; inspect and back up their data before explicitly recreating them.
+The `ai-artist-local-path` StorageClass pins both application PVCs to `/data/ai-artist/k3s-storage`. Each dynamically provisioned directory includes the PV name, so deleting and recreating a same-named PVC creates a new directory instead of implicitly reusing retained data. To recover a retained PV, explicitly rebind that PV to the replacement claim. Deployment fails if `/data` resolves to the root filesystem, if K3s has not loaded that path, if an existing PVC uses another StorageClass, or if a bound PV reports a path outside the SSD root. Existing test PVCs created by an older manifest are not deleted automatically; inspect and back up their data before explicitly recreating them.
 
 After the loopback smoke check passes, explicitly enable persistent tailnet-only HTTPS and inspect its status:
 

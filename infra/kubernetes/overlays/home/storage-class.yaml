@@ -5,6 +5,6 @@ metadata:
 provisioner: rancher.io/local-path
 parameters:
   nodePath: /data/ai-artist/k3s-storage
-  pathPattern: "{{ .PVC.Namespace }}/{{ .PVC.Name }}/"
+  pathPattern: "{{ .PVC.Namespace }}/{{ .PVC.Name }}/{{ .PVName }}/"
 reclaimPolicy: Retain
 volumeBindingMode: WaitForFirstConsumer

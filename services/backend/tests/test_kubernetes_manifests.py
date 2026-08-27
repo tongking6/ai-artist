@@ -36,6 +36,13 @@ def test_home_storage_class_is_pinned_to_the_ssd_path() -> None:
     assert "name: ai-artist-local-path" in storage_class
     assert "provisioner: rancher.io/local-path" in storage_class
     assert "nodePath: /data/ai-artist/k3s-storage" in storage_class
+    assert (
+        'pathPattern: "{{ .PVC.Namespace }}/{{ .PVC.Name }}/{{ .PVName }}/"'
+        in storage_class
+    )
+    assert (
+        'pathPattern: "{{ .PVC.Namespace }}/{{ .PVC.Name }}/"' not in storage_class
+    )
     assert storage_patch.count("storageClassName: ai-artist-local-path") == 2
     assert "default-local-storage-path" in deploy_script
     assert "spec.hostPath.path" in deploy_script
