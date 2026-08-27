@@ -62,7 +62,7 @@ subjects:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: ai-artist-local-path-provisioner
+  name: local-path-config
   namespace: ai-artist
 data:
   config.json: |-
@@ -140,4 +140,4 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: ai-artist-local-path-provisioner
+            name: local-path-config
