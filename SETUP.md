@@ -71,10 +71,9 @@ disable:
   - servicelb
 kube-proxy-arg:
   - nodeport-addresses=127.0.0.0/8
-default-local-storage-path: /data/k3s-storage
 ```
 
-`/etc/rancher/k3s/config.yaml` is host-wide K3s configuration. Its default local-storage path must not point at an application directory. The repository-owned `home` overlay creates `ai-artist-local-path` and explicitly assigns it to the PostgreSQL and MinIO PVCs. That StorageClass, rather than K3s's default local-storage path, pins AI Artist data to `/data/ai-artist/k3s-storage`.
+`/etc/rancher/k3s/config.yaml` is host-wide K3s configuration. AI Artist does not require or set `default-local-storage-path`; leave that host-wide policy to the server operator. The repository-owned `home` overlay creates `ai-artist-local-path` and explicitly assigns it to the PostgreSQL and MinIO PVCs. That StorageClass, rather than K3s's default local-storage path, pins AI Artist data to `/data/ai-artist/k3s-storage`.
 
 Restart K3s after changing the host-owned file, then deploy from a clean named Git commit on the Linux server:
 
