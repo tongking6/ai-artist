@@ -71,8 +71,10 @@ disable:
   - servicelb
 kube-proxy-arg:
   - nodeport-addresses=127.0.0.0/8
-default-local-storage-path: /data/ai-artist/k3s-storage
+default-local-storage-path: /data/k3s-storage
 ```
+
+`/etc/rancher/k3s/config.yaml` is host-wide K3s configuration. Its default local-storage path must not point at an application directory. The repository-owned `home` overlay creates `ai-artist-local-path` and explicitly assigns it to the PostgreSQL and MinIO PVCs. That StorageClass, rather than K3s's default local-storage path, pins AI Artist data to `/data/ai-artist/k3s-storage`.
 
 Restart K3s after changing the host-owned file, then deploy from a clean named Git commit on the Linux server:
 
@@ -86,10 +88,10 @@ The command:
 - builds the images and imports them into native K3s containerd;
 - creates random PostgreSQL/MinIO credentials only when the Kubernetes Secret is absent;
 - applies the `home` overlay and waits for every workload;
-- verifies PVC placement, running image tags, and the loopback ingress;
+- verifies the repo-owned StorageClass, PVC/PV placement, running image tags, and the loopback ingress;
 - never writes credential values to the repository.
 
-The `ai-artist-local-path` StorageClass pins both application PVCs to `/data/ai-artist/k3s-storage`. Each provisioned directory includes the PV name. With reclaim policy `Retain`, recreating a same-named PVC creates a new directory; recovery requires explicitly rebinding the retained PV. The deployment refuses to delete or silently reuse legacy PVC data.
+The `ai-artist-local-path` StorageClass pins both application PVCs to `/data/ai-artist/k3s-storage`, independently of K3s's host-wide default local-storage path. Each provisioned directory includes the PV name. With reclaim policy `Retain`, recreating a same-named PVC creates a new directory; recovery requires explicitly rebinding the retained PV. The deployment refuses to delete or silently reuse legacy PVC data. If an existing StorageClass, PVC, or PV does not match the repo-owned path contract, deployment stops; back up the data and reconcile or explicitly rebind the retained PV before retrying.
 
 After the loopback smoke check passes, explicitly enable persistent tailnet-only HTTPS:
 
