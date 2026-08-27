@@ -7,6 +7,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 storage_class="ai-artist-local-path"
 storage_root="/data/ai-artist/k3s-storage"
+storage_path_pattern='{{ .PVC.Namespace }}/{{ .PVC.Name }}/{{ .PVName }}/'
 image_tag=""
 ui_image=""
 backend_image=""
@@ -90,10 +91,6 @@ preflight() {
     echo "K3s config must restrict NodePort addresses to 127.0.0.0/8." >&2
     exit 1
   fi
-  if ! sudo grep -Eq '^[[:space:]]*default-local-storage-path:[[:space:]]*/data/ai-artist/k3s-storage[[:space:]]*$' /etc/rancher/k3s/config.yaml; then
-    echo "K3s config must set default-local-storage-path: $storage_root." >&2
-    exit 1
-  fi
   sudo install -d -m 0755 "$storage_root"
   local storage_mount
   storage_mount="$(sudo findmnt -n -o TARGET --target "$storage_root")"
@@ -102,8 +99,16 @@ preflight() {
     exit 1
   fi
   kube get nodes >/dev/null
-  if ! kube get configmap local-path-config -n kube-system -o jsonpath='{.data.config\.json}' | grep -F "$storage_root" >/dev/null; then
-    echo "K3s local-path provisioner has not loaded $storage_root; restart K3s after updating its config." >&2
+}
+
+verify_storage_class() {
+  local provisioner node_path path_pattern
+  provisioner="$(kube get storageclass "$storage_class" -o jsonpath='{.provisioner}')"
+  node_path="$(kube get storageclass "$storage_class" -o jsonpath='{.parameters.nodePath}')"
+  path_pattern="$(kube get storageclass "$storage_class" -o jsonpath='{.parameters.pathPattern}')"
+  if [[ "$provisioner" != "rancher.io/local-path" || "$node_path" != "$storage_root" || "$path_pattern" != "$storage_path_pattern" ]]; then
+    echo "StorageClass $storage_class must be the repo-owned rancher.io/local-path class rooted at $storage_root." >&2
+    echo "Back up required data and reconcile the StorageClass/PVCs manually; deployment will not migrate or delete existing volumes." >&2
     exit 1
   fi
 }
@@ -136,6 +141,12 @@ check_existing_storage() {
       verify_pvc_storage "$pvc_name"
     fi
   done
+}
+
+check_existing_storage_class() {
+  if kube get storageclass "$storage_class" >/dev/null 2>&1; then
+    verify_storage_class
+  fi
 }
 
 verify_storage() {
@@ -195,9 +206,11 @@ deploy() {
   require_clean_commit
   prepare_render_tree
   check_existing_storage
+  check_existing_storage_class
   ensure_secret
   build_and_import_images
   kube apply -k "$render_root/overlays/home"
+  verify_storage_class
   kube rollout restart deployment/backend-api deployment/generation-worker deployment/website -n "$namespace"
   kube rollout status statefulset/postgresql -n "$namespace" --timeout=300s
   kube rollout status statefulset/minio -n "$namespace" --timeout=300s
@@ -224,6 +237,7 @@ case "${1:-deploy}" in
   status)
     preflight
     kube get pods,services,ingress,pvc -n "$namespace"
+    verify_storage_class
     check_existing_storage
     ;;
   logs)
