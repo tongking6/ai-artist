@@ -32,7 +32,13 @@ TaskStatus = Literal["draft", "uploading", "ready"]
 AttemptStatus = Literal["queued", "generating", "ready", "failed"]
 MediaType = Literal["image/jpeg", "image/png"]
 UploadStatus = Literal["pending", "uploaded", "expired"]
-Style = Literal["warm_handmade"]
+Style = Literal[
+    "warm_handmade",
+    "manga_zine",
+    "impressionist_light",
+    "fauvist_expressive",
+    "childlike_crayon",
+]
 
 
 class Task(Base):

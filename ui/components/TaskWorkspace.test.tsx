@@ -83,6 +83,32 @@ describe("TaskWorkspace", () => {
     expect(screen.getByText(/OpenAI for image generation/i)).toBeVisible();
   });
 
+  it("saves the selected visual direction instead of forcing the default", async () => {
+    const draftForEditing: TaskView = { ...draftTask, title: "Lake day", note: "Warm sun" };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (init?.method === "PATCH") return new Response(JSON.stringify({ ...draftForEditing, style: "fauvist_expressive" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+      const payload = String(input).endsWith("/attempts") ? { attempts: [] } : draftForEditing;
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    render(<TaskWorkspace taskId="task_01JDEMO" />);
+
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Fauvist expressive" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("radio", { name: "Fauvist expressive" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save details" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/v1/tasks/task_01JDEMO"),
+      expect.objectContaining({ body: expect.stringContaining("fauvist_expressive") }),
+    ));
+  });
+
   it("keeps task input and attempt generation statuses visibly separate", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);

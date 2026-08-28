@@ -1,5 +1,6 @@
 import { getRuntimeConfig } from "@/lib/runtime-config";
 import { DemoApiError, demoRequest } from "@/lib/demo-api";
+import type { PostcardStyle } from "@/lib/postcard-styles";
 
 export type TaskStatus = "draft" | "uploading" | "ready";
 export type AttemptStatus = "queued" | "generating" | "ready" | "failed";
@@ -43,7 +44,7 @@ export interface TaskView {
   status: TaskStatus;
   title: string | null;
   note: string | null;
-  style: "warm_handmade" | null;
+  style: PostcardStyle | null;
   photos: PhotoView[];
   upload_summary: {
     uploaded_count: number;
@@ -59,7 +60,7 @@ export interface TaskSummaryView {
   task_id: string;
   status: TaskStatus;
   title: string | null;
-  style: "warm_handmade" | null;
+  style: PostcardStyle | null;
   photo_count: number;
   attempt_count: number;
   current_attempt: Pick<

@@ -98,9 +98,10 @@ Required fields:
 | `note` | Customer-provided creative note. |
 | `style` | M1-approved visual direction. |
 
-The first demo exposes one style ID: `warm_handmade`.
+The studio exposes five approved style IDs: `warm_handmade`, `manga_zine`,
+`impressionist_light`, `fauvist_expressive`, and `childlike_crayon`.
 
-The UI saves title, note, and style through `PATCH /v1/tasks/{task_id}`. It may mirror backend constraints but must treat LLD-02 validation as authoritative. The UI uses `title` 1–120 characters, `note` 1–1000 characters, and the fixed style `warm_handmade`. Once the task is `ready`, these base inputs and the photo set are immutable.
+The UI saves title, note, and style through `PATCH /v1/tasks/{task_id}`. It may mirror backend constraints but must treat LLD-02 validation as authoritative. The UI uses `title` 1–120 characters, `note` 1–1000 characters, and one approved style. Once the task is `ready`, these base inputs and the photo set are immutable.
 
 ### Upload
 

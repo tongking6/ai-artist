@@ -27,11 +27,11 @@ export default function HomePage() {
           </h1>
           <p className="hero-lede">
             Bring one to five favorite photos and a few words about the moment.
-            AI Artist shapes them into one warm, handmade landscape postcard.
+            Choose an art direction and AI Artist shapes them into one landscape postcard.
           </p>
           <CreateTaskButton />
           <p className="hero-footnote">
-            One style · One 1800 × 1200 PNG · Refine when it is ready
+            Five art directions · One 1800 × 1200 PNG · Refine when it is ready
           </p>
         </div>
 
@@ -58,7 +58,7 @@ export default function HomePage() {
               <span className="process-number">02</span>
               <div>
                 <h3>Let the scene take shape</h3>
-                <p>Your references are composed into one nostalgic, warm-handmade scene.</p>
+                <p>Your references are composed into one scene using your selected visual direction.</p>
               </div>
             </li>
             <li>
@@ -78,11 +78,11 @@ export default function HomePage() {
         </div>
         <div className="promise-copy">
           <SparkIcon className="promise-icon" />
-          <p className="eyebrow"><span /> The first studio style</p>
-          <h2>Warm, handmade, and grounded in the scene you lived.</h2>
+          <p className="eyebrow"><span /> Five studio styles</p>
+          <h2>Choose an interpretation grounded in the scene you lived.</h2>
           <p>
             The visual recipe preserves recognizable people and place anchors while
-            allowing a softer composition, organic texture, and nostalgic color.
+            allowing each approved style to guide composition, space, texture, and color.
             Your written note guides the artwork; it is not printed onto the image.
           </p>
           <ul className="check-list">

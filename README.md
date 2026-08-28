@@ -2,7 +2,7 @@
 
 AI Artist is a private, AI-assisted creative studio for turning user-owned photos and memories into finished visual keepsakes.
 
-The current Milestone 1 is a narrow `Memory Postcard Studio`: a user adds 1 to 5 JPEG or PNG photos, a title, a creative note, and the fixed `warm_handmade` style. Each successful generation Attempt produces one downloadable `1800x1200` PNG postcard.
+The current Milestone 1 is a narrow `Memory Postcard Studio`: a user adds 1 to 5 JPEG or PNG photos, a title, a creative note, and one approved visual style. Each successful generation Attempt produces one downloadable `1800x1200` PNG postcard.
 
 Repository: https://github.com/tongking6/ai-artist
 
@@ -27,7 +27,7 @@ In scope:
 - Private access from approved Tailscale devices.
 - Create and list postcard Tasks.
 - Upload 1 to 5 user-owned JPEG or PNG photos.
-- Save title, note, and the fixed `warm_handmade` style.
+- Save title, note, and one approved style: `warm_handmade`, `manga_zine`, `impressionist_light`, `fauvist_expressive`, or `childlike_crayon`.
 - Create immutable Attempts, inspect status/history, refine, and download any ready version.
 - Produce one fixed `1800x1200` PNG per successful Attempt.
 

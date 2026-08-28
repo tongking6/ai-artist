@@ -80,7 +80,7 @@ tasks/{task_id}/
 - LLD-03 generates exactly one `1800x1200` PNG.
 - LLD-03 performs minimum verification before setting `ready`.
 - LLD-03 makes at most one provider call per Attempt. The current runtime uses deterministic `fake-v1`; the target OpenAI adapter will use `gpt-image-2-2026-04-21` after it is implemented and verified.
-- LLD-03 uses the versioned `m1.postcard_prompt.v1` recipe: source-photo order has no product meaning; recognizable identity and major scene anchors are preserved; scene-aware creative recomposition is allowed; customer text is visual guidance and is not rendered into the image; refinement guidance supplements the base recipe.
+- LLD-03 uses the versioned `m1.postcard_prompt.v2` recipe: source-photo order has no product meaning; recognizable identity and major scene anchors are preserved; scene-aware creative recomposition is allowed; customer text is visual guidance and is not rendered into the image; refinement guidance supplements the base recipe.
 - The OpenAI adapter requests a `1808x1200` PNG and the Worker deterministically center-crops it to the fixed `1800x1200` artifact contract.
 - A claimed Attempt is never automatically retried or returned to `queued` in M1.
 - LLD-04 is not required.

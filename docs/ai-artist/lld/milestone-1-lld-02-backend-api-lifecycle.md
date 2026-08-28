@@ -110,7 +110,7 @@ Global rules:
 | status | `varchar(16)` | no | `draft` | `draft`, `uploading`, or `ready`. |
 | title | `varchar(120)` | yes | — | Immutable after intake completion. |
 | note | `varchar(1000)` | yes | — | Immutable after intake completion. |
-| style | `varchar(64)` | yes | — | Style ID; M1 initially accepts `warm_handmade`. |
+| style | `varchar(64)` | yes | — | Approved style ID: `warm_handmade`, `manga_zine`, `impressionist_light`, `fauvist_expressive`, or `childlike_crayon`. |
 | current_attempt_id | `varchar(40)` | yes | — | Attempt displayed as current for this Task. |
 | created_at | `timestamptz` | no | `now()` | Creation time. |
 | updated_at | `timestamptz` | no | `now()` | Last Task or current-Attempt lifecycle activity surfaced by the task collection. |
@@ -617,7 +617,7 @@ Every attempt stores a complete input snapshot:
     "title": "Spring Walk in Kyoto",
     "note": "A quiet spring afternoon",
     "style": "warm_handmade",
-    "prompt_recipe_version": "m1.postcard_prompt.v1",
+  "prompt_recipe_version": "m1.postcard_prompt.v2",
     "refinement_note": "Use softer colors and make the garden more prominent"
   },
   "provider_id": "fake",
@@ -664,7 +664,7 @@ Normative shape:
   "title": "Spring Walk in Kyoto",
   "note": "A quiet spring afternoon",
   "style": "warm_handmade",
-  "prompt_recipe_version": "m1.postcard_prompt.v1",
+  "prompt_recipe_version": "m1.postcard_prompt.v2",
   "refinement_note": "Use softer colors and make the garden more prominent",
   "output": {
     "artifact_type": "postcard",
@@ -680,7 +680,7 @@ Rules:
 - `input_snapshot` must not contain secrets.
 - `attempt_id` is execution metadata and is not part of the customer input snapshot.
 - The Attempt input snapshot is immutable after the Attempt is inserted.
-- `prompt_recipe_version` is exactly `m1.postcard_prompt.v1`; the Worker must not substitute a later deployed recipe for an existing Attempt.
+- New Attempts use `prompt_recipe_version = m1.postcard_prompt.v2`; the Worker retains `v1` support for already-created Attempts and must not substitute a later deployed recipe for an existing Attempt.
 - M1 has one fixed postcard PNG target.
 
 ## Attempt Creation
@@ -800,7 +800,7 @@ Rules:
 - At least one field must be present.
 - `title` must be 1 to 120 characters.
 - `note` must be 1 to 1000 characters.
-- `style` must be exactly `warm_handmade`.
+- `style` must be one of `warm_handmade`, `manga_zine`, `impressionist_light`, `fauvist_expressive`, or `childlike_crayon`.
 - Omitted fields remain unchanged.
 - The endpoint is allowed only while the Task is `draft` or `uploading` and before any Attempt exists.
 - It returns a conflict once the Task is `ready` or any Attempt exists.
@@ -1000,7 +1000,7 @@ LLD-02 provides:
 - Customer timestamps map PostgreSQL `timestamptz` to UTC RFC3339 strings with `Z`.
 - `GET /v1/tasks` returns every private-studio Task as a `TaskSummaryView`, ordered by `(updated_at DESC, task_id DESC)`, with opaque cursor pagination and no creative note, photo metadata, refinement note, failure code, or Artifact details.
 - `PATCH /v1/tasks/{task_id}` persists only title, note, and style before the Task is ready or any Attempt exists.
-- Task metadata validation is `title` 1–120 characters, `note` 1–1000 characters, and `style = warm_handmade`.
+- Task metadata validation is `title` 1–120 characters, `note` 1–1000 characters, and an approved style ID.
 - `POST /v1/tasks/{task_id}/complete-intake` requires complete metadata, 1 to 5 uploaded Assets, and zero pending slots before setting Task status to `ready`.
 - Upload slots use server-owned private keys and short TTLs.
 - `POST /v1/tasks/{task_id}/upload-slots` requires a validated per-file manifest, enforces `uploaded + pending + files.length <= 5`, and never creates more than 5 uploaded or pending Assets.

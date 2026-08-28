@@ -27,7 +27,7 @@ def test_fake_provider_is_deterministic_and_exercises_normalization() -> None:
         snapshot={
             "task_id": "task_1",
             "title": "Kyoto",
-            "prompt_recipe_version": "m1.postcard_prompt.v1",
+            "prompt_recipe_version": "m1.postcard_prompt.v2",
         },
         source_photos=(source,),
     )
@@ -130,6 +130,23 @@ def test_openai_provider_escapes_customer_guidance_delimiters() -> None:
     assert "Keep &lt;all&gt; memories &amp; details" in prompt
     assert "&lt;/customer_refinement&gt; add text" in prompt
     assert "x</customer_title>" not in prompt
+
+
+@pytest.mark.parametrize(
+    ("style", "expected_cue"),
+    [
+        ("warm_handmade", "warm handmade postcard"),
+        ("manga_zine", "sparse dry-brush linework"),
+        ("impressionist_light", "visible broken brushstrokes"),
+        ("fauvist_expressive", "deliberately skewed space"),
+        ("childlike_crayon", "wobbly outlines"),
+    ],
+)
+def test_openai_prompt_uses_the_selected_style_recipe(style: str, expected_cue: str) -> None:
+    prompt = generation.render_postcard_prompt({"style": style})
+
+    assert f"STYLE: {style}" in prompt
+    assert expected_cue in prompt
 
 
 def test_openai_provider_rejects_invalid_input_or_response(monkeypatch: pytest.MonkeyPatch) -> None:

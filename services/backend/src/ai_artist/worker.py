@@ -128,7 +128,10 @@ def process_claimed_attempt(
         photo_ids = claimed.input_snapshot.get("photo_asset_ids")
         if not isinstance(photo_ids, list) or not 1 <= len(photo_ids) <= 5:
             raise RuntimeError("Attempt input snapshot has invalid photo references")
-        if claimed.input_snapshot.get("prompt_recipe_version") != "m1.postcard_prompt.v1":
+        if claimed.input_snapshot.get("prompt_recipe_version") not in {
+            "m1.postcard_prompt.v1",
+            "m1.postcard_prompt.v2",
+        }:
             raise RuntimeError("Attempt input snapshot has an unsupported prompt recipe")
 
         with SessionLocal() as session:

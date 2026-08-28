@@ -1,3 +1,5 @@
+import type { PostcardStyle } from "@/lib/postcard-styles";
+
 const DEMO_STORAGE_PREFIX = "ai-artist:local-demo:";
 const DEMO_ARTIFACT_PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
@@ -33,7 +35,7 @@ interface DemoTask {
   status: DemoTaskStatus;
   title: string | null;
   note: string | null;
-  style: "warm_handmade" | null;
+  style: PostcardStyle | null;
   assets: DemoAsset[];
   attempts: DemoAttempt[];
   createdAt: string;
@@ -119,7 +121,7 @@ export async function demoRequest(path: string, init: RequestInit): Promise<unkn
     const body = parseBody<{
       title?: string;
       note?: string;
-      style?: "warm_handmade";
+      style?: PostcardStyle;
     }>(init);
     if (body.title !== undefined) task.title = body.title.trim();
     if (body.note !== undefined) task.note = body.note.trim();

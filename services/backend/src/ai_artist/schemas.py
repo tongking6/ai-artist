@@ -12,6 +12,14 @@ from pydantic import (
     model_validator,
 )
 
+type PostcardStyle = Literal[
+    "warm_handmade",
+    "manga_zine",
+    "impressionist_light",
+    "fauvist_expressive",
+    "childlike_crayon",
+]
+
 
 class ApiModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -88,7 +96,7 @@ class TaskView(ApiModel):
     status: Literal["draft", "uploading", "ready"]
     title: str | None
     note: str | None
-    style: Literal["warm_handmade"] | None
+    style: PostcardStyle | None
     photos: list[PhotoView]
     upload_summary: UploadSummaryView
     current_attempt: AttemptView | None
@@ -100,7 +108,7 @@ class TaskSummaryView(ApiModel):
     task_id: str
     status: Literal["draft", "uploading", "ready"]
     title: str | None
-    style: Literal["warm_handmade"] | None
+    style: PostcardStyle | None
     photo_count: int
     attempt_count: int
     current_attempt: AttemptSummaryView | None
@@ -116,7 +124,7 @@ class TaskListView(ApiModel):
 class UpdateTaskInput(ApiModel):
     title: Annotated[str, Field(min_length=1, max_length=120)] | None = None
     note: Annotated[str, Field(min_length=1, max_length=1000)] | None = None
-    style: Literal["warm_handmade"] | None = None
+    style: PostcardStyle | None = None
 
     @field_validator("title", "note")
     @classmethod

@@ -79,7 +79,7 @@ The input snapshot is the generation source of truth:
   "title": "Spring Walk in Kyoto",
   "note": "A quiet spring afternoon",
   "style": "warm_handmade",
-  "prompt_recipe_version": "m1.postcard_prompt.v1",
+  "prompt_recipe_version": "m1.postcard_prompt.v2",
   "refinement_note": "Use softer colors and make the garden more prominent",
   "output": {
     "artifact_type": "postcard",
@@ -182,7 +182,7 @@ M1 uses the Image API edit endpoint because generation is grounded in 1 to 5 cus
 endpoint: POST /v1/images/edits
 model: gpt-image-2-2026-04-21
 image: all 1 to 5 validated source photos in snapshot array order for transport only
-prompt: server-built m1.postcard_prompt.v1 instruction from the immutable Attempt snapshot
+prompt: server-built m1.postcard_prompt.v2 instruction from the immutable Attempt snapshot
 n: 1
 quality: medium
 size: 1808x1200
@@ -197,7 +197,7 @@ The dated model snapshot freezes M1 behavior. Changing the model, quality, or pr
 
 The first real-provider readiness check must use owned or repository-approved fixture photos and prove that the configured OpenAI account can access the model. OpenAI organization verification, if required for GPT Image access, is a deployment prerequisite rather than an application fallback.
 
-### Prompt Recipe: `m1.postcard_prompt.v1`
+### Prompt Recipe: `m1.postcard_prompt.v2`
 
 The backend renders one server-owned prompt from the immutable Attempt snapshot. `title`, `note`, and `refinement_note` are delimited customer data and are interpreted only as creative guidance; they do not replace the server-owned constraints.
 
@@ -224,11 +224,13 @@ CREATIVE DIRECTION
   decorative details in ways that fit the referenced scene.
 - Keep the result cohesive and believable as one travel-memory artwork.
 
-STYLE: warm_handmade
-- Use a warm handmade postcard aesthetic with hand-painted character, natural
-  colors, soft organic texture, gentle paper or brush detail, and an intimate,
-  nostalgic mood.
-- Avoid extreme cartoon distortion that damages identity or scene recognition.
+STYLE: <approved style recipe>
+- `warm_handmade`: natural color, paper texture, soft brush detail, nostalgic mood.
+- `manga_zine`: sparse linework, screen tone, flat graphic shadows, and negative space.
+- `impressionist_light`: broken brushstrokes and luminous, fleeting color.
+- `fauvist_expressive`: flattened, skewed space with emotionally chosen color and contrasting shadows.
+- `childlike_crayon`: wobbly wax-crayon marks, playful scale, and imperfect perspective.
+- Each recipe preserves recognizable people and major scene anchors; it must not imitate a specific artist, franchise, or real child's artwork.
 
 CUSTOMER GUIDANCE
 - Title context: <title>
@@ -365,7 +367,7 @@ LLD-03 provides:
 - LLD-03 atomically claims the oldest queued Attempt from PostgreSQL.
 - No separate `generation_job_id`, `generation_version`, or `latest_eligible_attempt_id` is used.
 - The worker reads the immutable Attempt snapshot.
-- The snapshot fixes `prompt_recipe_version = m1.postcard_prompt.v1`.
+- New snapshots fix `prompt_recipe_version = m1.postcard_prompt.v2`; the Worker continues to recognize `v1` for existing queued Attempts.
 - The worker supports 1 to 5 source photos.
 - Source-photo order has no product semantics and does not select a primary photo.
 - The prompt preserves recognizable people and major scene anchors while allowing scene-aware creative recomposition.

@@ -35,6 +35,13 @@ from ai_artist.schemas import (
 
 MAX_PHOTOS = 5
 MAX_PHOTO_BYTES = 20 * 1024 * 1024
+POSTCARD_STYLES = {
+    "warm_handmade",
+    "manga_zine",
+    "impressionist_light",
+    "fauvist_expressive",
+    "childlike_crayon",
+}
 
 
 def utcnow() -> datetime:
@@ -112,7 +119,7 @@ def update_task(
                 raise _invalid_task_metadata()
             if field == "note" and not 1 <= len(normalized) <= 1000:
                 raise _invalid_task_metadata()
-            if field == "style" and normalized != "warm_handmade":
+            if field == "style" and normalized not in POSTCARD_STYLES:
                 raise _invalid_task_metadata()
             setattr(task, field, normalized)
 
@@ -321,7 +328,7 @@ def complete_intake(session: Session, task_id: str) -> TaskView:
         if (
             not task.title
             or not task.note
-            or task.style != "warm_handmade"
+            or task.style not in POSTCARD_STYLES
             or not 1 <= uploaded_count <= MAX_PHOTOS
         ):
             raise DomainError(409, "intake_not_complete", "Task intake is incomplete.")
@@ -389,7 +396,7 @@ def create_attempt(
             "title": task.title,
             "note": task.note,
             "style": task.style,
-            "prompt_recipe_version": "m1.postcard_prompt.v1",
+            "prompt_recipe_version": "m1.postcard_prompt.v2",
             "refinement_note": refinement_note,
             "output": {
                 "artifact_type": "postcard",

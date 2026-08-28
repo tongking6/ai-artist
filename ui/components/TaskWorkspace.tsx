@@ -41,6 +41,12 @@ import {
   updateTask,
 } from "@/lib/api";
 import {
+  DEFAULT_POSTCARD_STYLE,
+  POSTCARD_STYLES,
+  postcardStyleLabel,
+  type PostcardStyle,
+} from "@/lib/postcard-styles";
+import {
   createOpaqueId,
   uploadToPresignedPost,
   validatePhotoSelection,
@@ -118,6 +124,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const [attempts, setAttempts] = useState<AttemptView[]>([]);
   const [title, setTitle] = useState("");
   const [note, setNote] = useState("");
+  const [style, setStyle] = useState<PostcardStyle>(DEFAULT_POSTCARD_STYLE);
   const [localUploads, setLocalUploads] = useState<LocalUpload[]>([]);
   const [refinementNote, setRefinementNote] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -157,6 +164,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
           if (hydratedTaskRef.current !== nextTask.task_id) {
             setTitle(nextTask.title ?? "");
             setNote(nextTask.note ?? "");
+            setStyle(nextTask.style ?? DEFAULT_POSTCARD_STYLE);
             hydratedTaskRef.current = nextTask.task_id;
           }
         })
@@ -410,7 +418,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       const nextTask = await updateTask(taskId, {
         title: title.trim(),
         note: note.trim(),
-        style: "warm_handmade",
+        style,
       });
       setTask(nextTask);
       if (showConfirmation) setActionMessage("Memory details saved.");
@@ -655,17 +663,29 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
 
                 <fieldset className="style-fieldset full-field" disabled={inputsLocked}>
                   <legend>Visual direction</legend>
-                  <label className="style-option selected">
-                    <input checked readOnly type="radio" value="warm_handmade" />
-                    <span className="style-swatch" aria-hidden="true">
-                      <i /><i /><i />
-                    </span>
-                    <span>
-                      <strong>Warm handmade</strong>
-                      <small>Natural color, paper texture, soft brush detail, nostalgic mood.</small>
-                    </span>
-                    <CheckIcon className="style-check" />
-                  </label>
+                  {POSTCARD_STYLES.map((option) => (
+                    <label
+                      className={`style-option style-option-${option.id} ${style === option.id ? "selected" : ""}`}
+                      key={option.id}
+                    >
+                      <input
+                        aria-label={option.label}
+                        checked={style === option.id}
+                        name="postcard-style"
+                        onChange={() => setStyle(option.id)}
+                        type="radio"
+                        value={option.id}
+                      />
+                      <span className="style-swatch" aria-hidden="true">
+                        <i /><i /><i />
+                      </span>
+                      <span>
+                        <strong>{option.label}</strong>
+                        <small>{option.description}</small>
+                      </span>
+                      {style === option.id && <CheckIcon className="style-check" />}
+                    </label>
+                  ))}
                 </fieldset>
               </div>
 
@@ -793,7 +813,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                   <div className="generate-summary">
                     <div className="summary-facts">
                       <span><strong>{task.upload_summary.uploaded_count}</strong> source photo{task.upload_summary.uploaded_count === 1 ? "" : "s"}</span>
-                      <span><strong>Warm handmade</strong> style</span>
+                      <span><strong>{postcardStyleLabel(task.style)}</strong> style</span>
                       <span><strong>1800 × 1200</strong> PNG</span>
                     </div>
                     <p>
@@ -926,7 +946,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               <p className="eyebrow"><span /> Your fixed inputs</p>
               <dl className="input-summary">
                 <div><dt>Title</dt><dd>{task.title ?? "Not saved"}</dd></div>
-                <div><dt>Style</dt><dd>Warm handmade</dd></div>
+                <div><dt>Style</dt><dd>{postcardStyleLabel(task.style)}</dd></div>
                 <div><dt>Photos</dt><dd>{task.upload_summary.uploaded_count} of 5</dd></div>
               </dl>
             </div>
