@@ -9,6 +9,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from ai_artist.adapters.object_store import ObjectStore
+from ai_artist.adapters.source_image import InvalidSourceImageError, normalize_source_image
 from ai_artist.config import Settings
 from ai_artist.errors import DomainError, task_not_found
 from ai_artist.ids import new_id
@@ -274,16 +275,32 @@ def complete_asset(
                     "uploaded_asset_invalid",
                     "Uploaded asset failed validation.",
                 )
-            extension = "jpg" if asset.media_type == "image/jpeg" else "png"
+            try:
+                source = normalize_source_image(object_store.get(upload_key))
+            except InvalidSourceImageError as error:
+                raise DomainError(
+                    422,
+                    "uploaded_asset_invalid",
+                    "Upload a valid JPEG or PNG photo.",
+                ) from error
+            if source.media_type != asset.media_type:
+                raise DomainError(
+                    422,
+                    "uploaded_asset_invalid",
+                    "Upload a valid JPEG or PNG photo.",
+                )
             immutable_key = (
-                f"tasks/{task_id}/assets/{asset.asset_id}/source.{extension}"
+                f"tasks/{task_id}/assets/{asset.asset_id}/source.{source.extension}"
             )
-            object_store.copy(upload_key, immutable_key)
+            if source.was_mpo:
+                object_store.put(immutable_key, source.body, source.media_type)
+            else:
+                object_store.copy(upload_key, immutable_key)
             finalized = object_store.inspect(immutable_key)
             if (
                 finalized is None
-                or finalized.size_bytes != asset.size_bytes
-                or finalized.media_type != asset.media_type
+                or finalized.size_bytes != len(source.body)
+                or finalized.media_type != source.media_type
             ):
                 raise DomainError(
                     422,
@@ -291,6 +308,7 @@ def complete_asset(
                     "Finalized asset failed validation.",
                 )
             asset.storage_key = immutable_key
+            asset.size_bytes = len(source.body)
             asset.upload_status = "uploaded"
             asset.updated_at = now
             task.status = "uploading"

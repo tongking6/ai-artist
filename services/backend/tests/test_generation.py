@@ -117,6 +117,42 @@ def test_openai_provider_builds_the_fixed_edit_request_for_all_source_photos(
     assert "Do not render the title" in prompt
 
 
+def test_openai_provider_normalizes_an_mpo_primary_frame_for_multipart_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class Client:
+        def __init__(self, **_: object) -> None:
+            self.images = SimpleNamespace(edit=self.edit)
+
+        def edit(self, **kwargs: object) -> object:
+            calls.append(kwargs)
+            return SimpleNamespace(
+                data=[SimpleNamespace(b64_json=b64encode(_png((1808, 1200), (1, 2, 3))).decode())]
+            )
+
+    monkeypatch.setattr(generation, "OpenAI", Client)
+    OpenAIGenerationProvider().generate_postcard(
+        GeneratePostcardInput(snapshot={}, source_photos=(_mpo((12, 12)),))
+    )
+
+    image = cast(list[tuple[str, bytes, str]], calls[0]["image"])[0]
+    assert (image[0], image[2]) == ("reference-1.jpg", "image/jpeg")
+    with Image.open(io.BytesIO(image[1])) as normalized:
+        assert normalized.format == "JPEG"
+        assert normalized.mode == "RGB"
+        assert normalized.size == (12, 12)
+
+
+def test_openai_multipart_accepts_standard_jpeg_and_png() -> None:
+    jpeg = _jpeg((12, 12), (1, 2, 3))
+    png = _png((12, 12), (1, 2, 3))
+
+    assert generation._multipart_image(jpeg, 1) == ("reference-1.jpg", jpeg, "image/jpeg")
+    assert generation._multipart_image(png, 1) == ("reference-1.png", png, "image/png")
+
+
 def test_openai_provider_escapes_customer_guidance_delimiters() -> None:
     prompt = generation.render_postcard_prompt(
         {
@@ -259,4 +295,12 @@ def _jpeg(size: tuple[int, int], color: tuple[int, int, int]) -> bytes:
     image = Image.new("RGB", size, color)
     output = io.BytesIO()
     image.save(output, format="JPEG")
+    return output.getvalue()
+
+
+def _mpo(size: tuple[int, int]) -> bytes:
+    primary = Image.new("RGB", size, (1, 2, 3))
+    secondary = Image.new("RGB", size, (4, 5, 6))
+    output = io.BytesIO()
+    primary.save(output, format="MPO", save_all=True, append_images=[secondary])
     return output.getvalue()

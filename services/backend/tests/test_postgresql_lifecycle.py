@@ -196,7 +196,7 @@ def test_uploaded_asset_is_promoted_to_an_immutable_key(
     task_id = "task_immutable"
     asset_id = "asset_immutable"
     upload_key = f"tasks/{task_id}/uploads/{asset_id}.png"
-    original = b"original-photo"
+    original = _png((32, 24), (120, 80, 40))
     store = MemoryObjectStore({upload_key: (original, "image/png")})
     with sessions.begin() as session:
         session.add(
@@ -250,6 +250,81 @@ def test_uploaded_asset_is_promoted_to_an_immutable_key(
         retry = service.create_upload_slots(session, store, Settings(), task_id, manifest)
     assert retry.slots == []
     assert store.upload_keys == []
+
+
+def test_mpo_upload_is_normalized_to_an_immutable_jpeg(
+    sessions: sessionmaker[Session],
+) -> None:
+    now = datetime.now(UTC)
+    task_id = "task_mpo"
+    asset_id = "asset_mpo"
+    upload_key = f"tasks/{task_id}/uploads/{asset_id}.jpg"
+    original = _mpo((32, 24))
+    store = MemoryObjectStore({upload_key: (original, "image/jpeg")})
+    with sessions.begin() as session:
+        session.add(Task(task_id=task_id, status="uploading", created_at=now, updated_at=now))
+        session.add(
+            Asset(
+                asset_id=asset_id,
+                task_id=task_id,
+                client_file_id="file_mpo",
+                upload_batch_key="batch_mpo",
+                filename="photo.jpeg",
+                media_type="image/jpeg",
+                size_bytes=len(original),
+                upload_status="pending",
+                storage_key=upload_key,
+                upload_url_expires_at=now + timedelta(minutes=15),
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    with sessions() as session:
+        photo = service.complete_asset(session, store, task_id, asset_id)
+    immutable_key = f"tasks/{task_id}/assets/{asset_id}/source.jpg"
+    normalized = store.get(immutable_key)
+    assert photo.upload_status == "uploaded"
+    assert photo.size_bytes == len(normalized)
+    with Image.open(io.BytesIO(normalized)) as image:
+        assert image.format == "JPEG"
+        assert image.mode == "RGB"
+        assert image.size == (32, 24)
+
+
+def test_corrupt_upload_is_rejected_during_finalization(
+    sessions: sessionmaker[Session],
+) -> None:
+    now = datetime.now(UTC)
+    task_id = "task_corrupt_upload"
+    asset_id = "asset_corrupt_upload"
+    upload_key = f"tasks/{task_id}/uploads/{asset_id}.png"
+    corrupt = b"not an image"
+    store = MemoryObjectStore({upload_key: (corrupt, "image/png")})
+    with sessions.begin() as session:
+        session.add(Task(task_id=task_id, status="uploading", created_at=now, updated_at=now))
+        session.add(
+            Asset(
+                asset_id=asset_id,
+                task_id=task_id,
+                client_file_id="file_corrupt_upload",
+                upload_batch_key="batch_corrupt_upload",
+                filename="photo.png",
+                media_type="image/png",
+                size_bytes=len(corrupt),
+                upload_status="pending",
+                storage_key=upload_key,
+                upload_url_expires_at=now + timedelta(minutes=15),
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    with sessions() as session, pytest.raises(DomainError) as error:
+        service.complete_asset(session, store, task_id, asset_id)
+    assert error.value.code == "uploaded_asset_invalid"
+    assert error.value.message == "Upload a valid JPEG or PNG photo."
+    assert all("/assets/" not in key for key in store.objects)
 
 
 def test_concurrent_workers_claim_an_attempt_once(
@@ -474,4 +549,12 @@ def _png(size: tuple[int, int], color: tuple[int, int, int]) -> bytes:
     image = Image.new("RGB", size, color)
     output = io.BytesIO()
     image.save(output, format="PNG")
+    return output.getvalue()
+
+
+def _mpo(size: tuple[int, int]) -> bytes:
+    primary = Image.new("RGB", size, (1, 2, 3))
+    secondary = Image.new("RGB", size, (4, 5, 6))
+    output = io.BytesIO()
+    primary.save(output, format="MPO", save_all=True, append_images=[secondary])
     return output.getvalue()
