@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ai_artist import service, worker
 from ai_artist.adapters.object_store import PresignedPost, StoredObject
+from ai_artist.adapters.source_image import NormalizedSourceImage
 from ai_artist.config import Settings
 from ai_artist.errors import DomainError
 from ai_artist.models import Artifact, Asset, Attempt, Base, Task
@@ -196,7 +197,7 @@ def test_uploaded_asset_is_promoted_to_an_immutable_key(
     task_id = "task_immutable"
     asset_id = "asset_immutable"
     upload_key = f"tasks/{task_id}/uploads/{asset_id}.png"
-    original = b"original-photo"
+    original = _png((32, 24), (120, 80, 40))
     store = MemoryObjectStore({upload_key: (original, "image/png")})
     with sessions.begin() as session:
         session.add(
@@ -250,6 +251,127 @@ def test_uploaded_asset_is_promoted_to_an_immutable_key(
         retry = service.create_upload_slots(session, store, Settings(), task_id, manifest)
     assert retry.slots == []
     assert store.upload_keys == []
+
+
+def test_mpo_upload_is_normalized_to_an_immutable_jpeg(
+    sessions: sessionmaker[Session],
+) -> None:
+    now = datetime.now(UTC)
+    task_id = "task_mpo"
+    asset_id = "asset_mpo"
+    upload_key = f"tasks/{task_id}/uploads/{asset_id}.jpg"
+    original = _mpo((32, 24), orientation=6)
+    store = MemoryObjectStore({upload_key: (original, "image/jpeg")})
+    with sessions.begin() as session:
+        session.add(Task(task_id=task_id, status="uploading", created_at=now, updated_at=now))
+        session.add(
+            Asset(
+                asset_id=asset_id,
+                task_id=task_id,
+                client_file_id="file_mpo",
+                upload_batch_key="batch_mpo",
+                filename="photo.jpeg",
+                media_type="image/jpeg",
+                size_bytes=len(original),
+                upload_status="pending",
+                storage_key=upload_key,
+                upload_url_expires_at=now + timedelta(minutes=15),
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    with sessions() as session:
+        photo = service.complete_asset(session, store, task_id, asset_id)
+    immutable_key = f"tasks/{task_id}/assets/{asset_id}/source.jpg"
+    normalized = store.get(immutable_key)
+    assert photo.upload_status == "uploaded"
+    assert photo.size_bytes == len(normalized)
+    with Image.open(io.BytesIO(normalized)) as image:
+        assert image.format == "JPEG"
+        assert image.mode == "RGB"
+        assert image.size == (24, 32)
+
+
+def test_corrupt_upload_is_rejected_during_finalization(
+    sessions: sessionmaker[Session],
+) -> None:
+    now = datetime.now(UTC)
+    task_id = "task_corrupt_upload"
+    asset_id = "asset_corrupt_upload"
+    upload_key = f"tasks/{task_id}/uploads/{asset_id}.png"
+    corrupt = b"not an image"
+    store = MemoryObjectStore({upload_key: (corrupt, "image/png")})
+    with sessions.begin() as session:
+        session.add(Task(task_id=task_id, status="uploading", created_at=now, updated_at=now))
+        session.add(
+            Asset(
+                asset_id=asset_id,
+                task_id=task_id,
+                client_file_id="file_corrupt_upload",
+                upload_batch_key="batch_corrupt_upload",
+                filename="photo.png",
+                media_type="image/png",
+                size_bytes=len(corrupt),
+                upload_status="pending",
+                storage_key=upload_key,
+                upload_url_expires_at=now + timedelta(minutes=15),
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    with sessions() as session, pytest.raises(DomainError) as error:
+        service.complete_asset(session, store, task_id, asset_id)
+    assert error.value.code == "uploaded_asset_invalid"
+    assert error.value.message == "Upload a valid JPEG or PNG photo."
+    assert all("/assets/" not in key for key in store.objects)
+
+
+def test_oversize_normalized_upload_is_rejected_before_immutable_write(
+    sessions: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime.now(UTC)
+    task_id = "task_oversize_normalized_upload"
+    asset_id = "asset_oversize_normalized_upload"
+    upload_key = f"tasks/{task_id}/uploads/{asset_id}.jpg"
+    original = _jpeg((32, 24), (120, 80, 40))
+    store = MemoryObjectStore({upload_key: (original, "image/jpeg")})
+    monkeypatch.setattr(
+        service,
+        "normalize_source_image",
+        lambda _: NormalizedSourceImage(
+            body=b"x" * (service.MAX_PHOTO_BYTES + 1),
+            media_type="image/jpeg",
+            extension="jpg",
+            was_mpo=True,
+        ),
+    )
+    with sessions.begin() as session:
+        session.add(Task(task_id=task_id, status="uploading", created_at=now, updated_at=now))
+        session.add(
+            Asset(
+                asset_id=asset_id,
+                task_id=task_id,
+                client_file_id="file_oversize_normalized_upload",
+                upload_batch_key="batch_oversize_normalized_upload",
+                filename="photo.jpeg",
+                media_type="image/jpeg",
+                size_bytes=len(original),
+                upload_status="pending",
+                storage_key=upload_key,
+                upload_url_expires_at=now + timedelta(minutes=15),
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    with sessions() as session, pytest.raises(DomainError) as error:
+        service.complete_asset(session, store, task_id, asset_id)
+    assert error.value.code == "uploaded_asset_invalid"
+    assert error.value.message == "Upload a valid JPEG or PNG photo no larger than 20 MB."
+    assert all("/assets/" not in key for key in store.objects)
 
 
 def test_concurrent_workers_claim_an_attempt_once(
@@ -474,4 +596,24 @@ def _png(size: tuple[int, int], color: tuple[int, int, int]) -> bytes:
     image = Image.new("RGB", size, color)
     output = io.BytesIO()
     image.save(output, format="PNG")
+    return output.getvalue()
+
+
+def _jpeg(size: tuple[int, int], color: tuple[int, int, int]) -> bytes:
+    image = Image.new("RGB", size, color)
+    output = io.BytesIO()
+    image.save(output, format="JPEG")
+    return output.getvalue()
+
+
+def _mpo(size: tuple[int, int], *, orientation: int | None = None) -> bytes:
+    primary = Image.new("RGB", size, (1, 2, 3))
+    secondary = Image.new("RGB", size, (4, 5, 6))
+    output = io.BytesIO()
+    save_kwargs: dict[str, object] = {"save_all": True, "append_images": [secondary]}
+    if orientation is not None:
+        exif = Image.Exif()
+        exif[274] = orientation
+        save_kwargs["exif"] = exif.tobytes()
+    primary.save(output, format="MPO", **save_kwargs)
     return output.getvalue()

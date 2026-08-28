@@ -11,6 +11,8 @@ from typing import Any, Protocol
 from openai import OpenAI
 from PIL import Image, ImageDraw
 
+from ai_artist.adapters.source_image import InvalidSourceImageError, normalize_source_image
+
 
 @dataclass(frozen=True)
 class GeneratePostcardInput:
@@ -98,13 +100,13 @@ class OpenAIGenerationProvider:
 
 
 def _multipart_image(photo: bytes, index: int) -> tuple[str, bytes, str]:
-    with Image.open(io.BytesIO(photo)) as image:
-        image_format = image.format
-    if image_format == "JPEG":
-        return (f"reference-{index}.jpg", photo, "image/jpeg")
-    if image_format == "PNG":
-        return (f"reference-{index}.png", photo, "image/png")
-    raise RuntimeError("OpenAI postcard generation requires JPEG or PNG source photos")
+    try:
+        source = normalize_source_image(photo)
+    except InvalidSourceImageError as error:
+        raise RuntimeError(
+            "OpenAI postcard generation requires JPEG or PNG source photos"
+        ) from error
+    return (f"reference-{index}.{source.extension}", source.body, source.media_type)
 
 
 def render_postcard_prompt(snapshot: dict[str, Any]) -> str:
