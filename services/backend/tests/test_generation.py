@@ -134,7 +134,7 @@ def test_openai_provider_normalizes_an_mpo_primary_frame_for_multipart_input(
 
     monkeypatch.setattr(generation, "OpenAI", Client)
     OpenAIGenerationProvider().generate_postcard(
-        GeneratePostcardInput(snapshot={}, source_photos=(_mpo((12, 12)),))
+        GeneratePostcardInput(snapshot={}, source_photos=(_mpo((12, 20), orientation=6),))
     )
 
     image = cast(list[tuple[str, bytes, str]], calls[0]["image"])[0]
@@ -142,7 +142,7 @@ def test_openai_provider_normalizes_an_mpo_primary_frame_for_multipart_input(
     with Image.open(io.BytesIO(image[1])) as normalized:
         assert normalized.format == "JPEG"
         assert normalized.mode == "RGB"
-        assert normalized.size == (12, 12)
+        assert normalized.size == (20, 12)
 
 
 def test_openai_multipart_accepts_standard_jpeg_and_png() -> None:
@@ -298,9 +298,14 @@ def _jpeg(size: tuple[int, int], color: tuple[int, int, int]) -> bytes:
     return output.getvalue()
 
 
-def _mpo(size: tuple[int, int]) -> bytes:
+def _mpo(size: tuple[int, int], *, orientation: int | None = None) -> bytes:
     primary = Image.new("RGB", size, (1, 2, 3))
     secondary = Image.new("RGB", size, (4, 5, 6))
     output = io.BytesIO()
-    primary.save(output, format="MPO", save_all=True, append_images=[secondary])
+    save_kwargs: dict[str, object] = {"save_all": True, "append_images": [secondary]}
+    if orientation is not None:
+        exif = Image.Exif()
+        exif[274] = orientation
+        save_kwargs["exif"] = exif.tobytes()
+    primary.save(output, format="MPO", **save_kwargs)
     return output.getvalue()

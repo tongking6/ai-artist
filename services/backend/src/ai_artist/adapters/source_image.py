@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 
 class InvalidSourceImageError(ValueError):
@@ -26,7 +26,7 @@ def normalize_source_image(photo: bytes) -> NormalizedSourceImage:
             image.load()
             if image_format == "MPO":
                 output = io.BytesIO()
-                image.convert("RGB").save(output, format="JPEG")
+                ImageOps.exif_transpose(image).convert("RGB").save(output, format="JPEG")
                 return NormalizedSourceImage(
                     body=output.getvalue(),
                     media_type="image/jpeg",

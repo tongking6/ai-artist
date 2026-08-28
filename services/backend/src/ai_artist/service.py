@@ -289,6 +289,12 @@ def complete_asset(
                     "uploaded_asset_invalid",
                     "Upload a valid JPEG or PNG photo.",
                 )
+            if not 1 <= len(source.body) <= MAX_PHOTO_BYTES:
+                raise DomainError(
+                    422,
+                    "uploaded_asset_invalid",
+                    "Upload a valid JPEG or PNG photo no larger than 20 MB.",
+                )
             immutable_key = (
                 f"tasks/{task_id}/assets/{asset.asset_id}/source.{source.extension}"
             )
